@@ -1245,7 +1245,7 @@ useEffect(() => {
                       Dream Internship
                     </span>
                     <span className="block text-red-600 text-4xl sm:text-5xl lg:text-6xl max-w-max font-bold">
-                      For Cost
+                      For Free
                     </span>
 
                   </span>
