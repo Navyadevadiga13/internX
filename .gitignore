@@ -1,0 +1,12 @@
+project.tar.gz
+root@srv880794.hstgr.cloud
+
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+
+frontend/dist/
+backend/uploads/
+
+.env
+backend/.env

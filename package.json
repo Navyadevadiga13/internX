@@ -1,0 +1,32 @@
+{
+  "name": "internx-portal",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "backend": "cd backend && npm run dev",
+    "frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "build:backend": "cd backend && npm install --production",
+    "install-all": "npm install && cd backend && npm install && cd frontend && npm install",
+    "start": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "start:prod": "cd backend && npm start",
+    "lint": "cd frontend && npm run lint",
+    "preview": "cd frontend && npm run preview",
+    "deploy:build": "npm run install-all && npm run build && npm run build:backend",
+    "deploy:start": "pm2 start ecosystem.config.js",
+    "deploy:stop": "pm2 stop internx-backend",
+    "deploy:restart": "pm2 restart internx-backend",
+    "deploy:logs": "pm2 logs internx-backend"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "cors": "^2.8.5",
+    "vite": "^7.0.0",
+    "xlsx": "^0.18.5"
+  }
+}

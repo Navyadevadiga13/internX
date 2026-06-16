@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>InternX | Internship Opportunities</title>
+    <meta name="description" content="Explore internship opportunities with InternX. Connect with top employers, gain real-world experience, and kickstart your career today." />
+    <meta name="keywords" content="internship opportunities, career development, student jobs, InternX internships, job placements" />
+    <meta name="author" content="InternX" />
+    <meta name="robots" content="index, follow" />
+    <link rel="icon" type="image/png" href="/internx-favicon.png" />
+    <link rel="apple-touch-icon" href="/internx-favicon.png" />
+  <meta name="theme-color" content="#ffffff" />
+<link rel="icon" type="image/png" href="/internx-favicon.png" />
+    <!-- Favicon and Icons -->
+    <link
+      rel="icon"
+      type="image/png"
+      href="internx-favicon.png"
+      sizes="any"
+    />
+    <!-- Open Graph Tags for Social Media -->
+    <meta property="og:title" content="InternX | Find Internship Opportunities" />
+    <meta property="og:description" content="Join InternX to explore internships, connect with employers, and build your career with hands-on experience." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://internx.cc/" />
+    <meta property="og:image" content="https://internx.cc/images/internx-og-image.png" />
+    <meta property="og:site_name" content="InternX" />
+
+    <!-- Twitter Card Tags -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="InternX | Internship Opportunities" />
+    <meta name="twitter:description" content="Explore internships with InternX. Connect with top companies and start your career journey today." />
+    <meta name="twitter:image" content="https://internx.cc/images/internx-twitter-image.png" />
+
+    <!-- Structured Data (JSON-LD) for Search Engines -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "InternX",
+      "url": "https://internx.cc/",
+      "description": "InternX offers internship opportunities for students to connect with top employers and gain valuable career experience.",
+      "publisher": {
+        "@type": "Organization",
+        "name": "InternX",
+        "logo": {
+          "@type": "ImageObject",
+          "url": "https://internx.cc/images/logo.png"
+        }
+      },
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": "https://internx.cc/search?q={search_term_string}",
+        "query-input": "required name=search_term_string"
+      },
+      "hasPart": [
+        {
+          "@type": "WebPage",
+          "name": "About Us",
+          "url": "https://internx.cc/about"
+        },
+        {
+          "@type": "WebPage",
+          "name": "Internships",
+          "url": "https://internx.cc/internships"
+        },
+        {
+          "@type": "WebPage",
+          "name": "Register",
+          "url": "https://internx.cc/register"
+        }
+      ]
+    }
+    </script>
+
+    <!-- Canonical URL to Avoid Duplicate Content -->
+    <link rel="canonical" href="https://internx.cc/" />
+
+    <style>
+      /* Hidden navigation for SEO (Google can index these) */
+      .seo-nav {
+        position: absolute;
+        left: -9999px;
+        top: -9999px;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+      }
+
+      /* Basic reset */
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        line-height: 1.6;
+        color: #333;
+      }
+    </style>
+  </head>
+  <body>
+
+
+    <!-- Hidden SEO Navigation for Search Engines -->
+    <nav class="seo-nav" aria-label="Main navigation">
+      <ul>
+        <li><a href="/" title="InternX Home">Home</a></li>
+        <li><a href="/internships" title="Browse Internship Opportunities">Internships</a></li>
+        <li><a href="/about" title="About InternX">About Us</a></li>
+        <li><a href="/register" title="Register for InternX">Register</a></li>
+        <li><a href="/login" title="Login to InternX">Login</a></li>
+        <li><a href="/companies" title="Companies Hiring Interns">Companies</a></li>
+        <li><a href="/contact" title="Contact InternX">Contact</a></li>
+      </ul>
+    </nav>
+
+    <!-- Hidden SEO Content for Search Engines -->
+    <div class="seo-nav">
+      <h1>InternX - Find Your Perfect Internship</h1>
+      <h2>Internship Opportunities for Students</h2>
+      <p>Discover internship opportunities with top companies. Build your career, gain experience, and connect with industry leaders through InternX.</p>
+      <h3>Featured Internship Categories</h3>
+      <ul>
+        <li>Technology Internships</li>
+        <li>Marketing Internships</li>
+        <li>Finance Internships</li>
+        <li>Engineering Internships</li>
+        <li>Design Internships</li>
+      </ul>
+    </div>
+
+    <!-- React App Root -->
+    <div id="root"></div>
+    
+    <!-- Preloader Script -->
+    <script>
+      // Preloader functionality
+      window.addEventListener('load', function() {
+        const preloader = document.getElementById('preloader');
+        const root = document.getElementById('root');
+        
+        // Minimum loading time for better UX
+        setTimeout(() => {
+          preloader.style.opacity = '0';
+          root.classList.add('loaded');
+          
+          setTimeout(() => {
+            preloader.style.display = 'none';
+          }, 150);
+        }, 50); // Show preloader for at least 1.5 seconds
+      });
+
+      // Fallback: Hide preloader after 5 seconds if something goes wrong
+      setTimeout(() => {
+        const preloader = document.getElementById('preloader');
+        if (preloader && preloader.style.display !== 'none') {
+          preloader.style.opacity = '0';
+          document.getElementById('root').classList.add('loaded');
+          setTimeout(() => {
+            preloader.style.display = 'none';
+          }, 150);
+        }
+      }, 2000);
+
+      // Favicon error handling
+      window.addEventListener('DOMContentLoaded', function() {
+        const favicon = document.querySelector('link[rel="icon"]');
+        if (favicon) {
+          favicon.onerror = function() {
+            // Fallback to a default favicon or remove if not found
+            console.log('Favicon not found, using default');
+            this.href = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🚀</text></svg>';
+          };
+        }
+      });
+    </script>
+
+    <!-- React App Script -->
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
