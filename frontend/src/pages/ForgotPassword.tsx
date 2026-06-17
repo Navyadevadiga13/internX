@@ -17,22 +17,22 @@ const getApiBaseUrl = () => {
 const API_BASE_URL = getApiBaseUrl();
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const OTP_EXPIRY_SECONDS   = 300;  // 5 min OTP validity
-const RESEND_COOLDOWN_SECS = 120;  // 2 min between resends
-const MAX_RESENDS          = 2;    // First send + 2 resends = 3 total → then blocked
+const OTP_EXPIRY_SECONDS   = 300;
+const RESEND_COOLDOWN_SECS = 60;
+const MAX_RESENDS          = 2;
 
-// localStorage keys — persist across refresh
-const LS_EMAIL          = 'fp_email';
-const LS_STEP           = 'fp_step';
-const LS_OTP_SENT_AT    = 'fp_otp_sent_at';    // epoch ms when last OTP was sent
-const LS_RESEND_AT      = 'fp_resend_at';       // epoch ms when last resend happened
-const LS_BLOCKED_UNTIL  = 'fp_blocked_until';   // epoch ms when block expires (from server)
-const LS_RESEND_COUNT   = 'fp_resend_count';    // number of resends used (0‥MAX_RESENDS)
+const LS_EMAIL         = 'fp_email';
+const LS_STEP          = 'fp_step';
+const LS_OTP_SENT_AT   = 'fp_otp_sent_at';
+const LS_RESEND_AT     = 'fp_resend_at';
+const LS_BLOCKED_UNTIL = 'fp_blocked_until';
+const LS_RESEND_COUNT  = 'fp_resend_count';
+// FIX: persist the verified OTP so step 3 can send it to reset-password
+const LS_VERIFIED_OTP  = 'fp_verified_otp';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const now = () => Date.now();
 
-/** Seconds remaining until a future epoch timestamp, floored to 0. */
 const secsUntil = (epochMs: number | null) =>
   epochMs ? Math.max(0, Math.ceil((epochMs - now()) / 1000)) : 0;
 
@@ -49,10 +49,10 @@ const isPasswordStrong = (p: string) => PASSWORD_RULES.every(r => r.test(p));
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 const OtpTimer = ({ seconds, total }: { seconds: number; total: number }) => {
-  const radius       = 20;
+  const radius        = 20;
   const circumference = 2 * Math.PI * radius;
-  const progress     = (seconds / total) * circumference;
-  const isUrgent     = seconds <= 60;
+  const progress      = (seconds / total) * circumference;
+  const isUrgent      = seconds <= 60;
   const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
   const ss = String(seconds % 60).padStart(2, '0');
 
@@ -137,31 +137,67 @@ const PasswordInput = ({
 const ForgotPassword = () => {
   const navigate = useNavigate();
 
-  // ── Persisted state (restored from localStorage on mount) ─────────────────
-  // step: 1 = email entry, 2 = OTP verify, 3 = set new password
-  const [step, setStep]       = useState<number>(() => Number(localStorage.getItem(LS_STEP) || '1'));
-  const [email, setEmail]     = useState<string>(() => localStorage.getItem(LS_EMAIL) || '');
+  // FIX: don't trust a persisted step > 1 blindly. We compute the "safe" initial
+  // step here, before first render, by checking whether the saved OTP window
+  // (if any) has already expired. If it has, we start at step 1 regardless of
+  // what was last written to localStorage.
+  const computeInitialStep = (): number => {
+    const savedStep = Number(localStorage.getItem(LS_STEP) || '1');
+    if (savedStep <= 1) return 1;
 
-  // Epoch-ms timestamps — the source of truth for timers.
-  // Storing timestamps (not countdowns) means refresh can always compute "how much left".
+    const savedSentAt = Number(localStorage.getItem(LS_OTP_SENT_AT)) || null;
+    const stillValid  = savedSentAt !== null && secsUntil(savedSentAt + OTP_EXPIRY_SECONDS * 1000) > 0;
+
+    return stillValid ? savedStep : 1;
+  };
+
+  const [step, setStep]   = useState<number>(computeInitialStep);
+  const [email, setEmail] = useState<string>(() => {
+    // If we're resetting to step 1 because the session is stale, don't
+    // prefill the email either — start completely fresh.
+    return computeInitialStep() === 1 && Number(localStorage.getItem(LS_STEP) || '1') > 1
+      ? ''
+      : (localStorage.getItem(LS_EMAIL) || '');
+  });
+
   const [otpSentAt,    setOtpSentAt]    = useState<number | null>(() => Number(localStorage.getItem(LS_OTP_SENT_AT))   || null);
   const [resendAt,     setResendAt]     = useState<number | null>(() => Number(localStorage.getItem(LS_RESEND_AT))     || null);
   const [blockedUntil, setBlockedUntil] = useState<number | null>(() => Number(localStorage.getItem(LS_BLOCKED_UNTIL)) || null);
   const [resendCount,  setResendCount]  = useState<number>(() => Number(localStorage.getItem(LS_RESEND_COUNT) || '0'));
 
-  // ── Derived tick state (re-computed every second) ─────────────────────────
   const [otpSecsLeft,    setOtpSecsLeft]    = useState(() => secsUntil(otpSentAt ? otpSentAt + OTP_EXPIRY_SECONDS * 1000 : null));
   const [resendSecsLeft, setResendSecsLeft] = useState(() => secsUntil(resendAt  ? resendAt  + RESEND_COOLDOWN_SECS * 1000 : null));
   const [blockSecsLeft,  setBlockSecsLeft]  = useState(() => secsUntil(blockedUntil));
 
-  const [loading, setLoading] = useState(false);
+  const [loading,  setLoading]  = useState(false);
   const [formData, setFormData] = useState({ otp: '', newPassword: '', confirmPassword: '' });
+
+  // FIX: store the verified OTP separately so it survives moving to step 3
+  // and so reset-password always sends the correct value
+  const verifiedOtpRef = useRef<string>(localStorage.getItem(LS_VERIFIED_OTP) || '');
 
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ── Single interval that drives all derived countdown values ──────────────
-  // Because we store epoch timestamps, the tick simply recomputes from wall clock.
-  // This means refresh doesn't "lose" time — the ms count is always Date.now()-based.
+  // Keep refs in sync with state so callbacks always read fresh values
+  const otpSentAtRef    = useRef(otpSentAt);
+  const resendAtRef     = useRef(resendAt);
+  const blockedUntilRef = useRef(blockedUntil);
+
+  useEffect(() => { otpSentAtRef.current    = otpSentAt;    }, [otpSentAt]);
+  useEffect(() => { resendAtRef.current     = resendAt;     }, [resendAt]);
+  useEffect(() => { blockedUntilRef.current = blockedUntil; }, [blockedUntil]);
+
+  // Reads from ref — never stale, safe to call in any handler
+  const isOtpStillValid = () =>
+    otpSentAtRef.current !== null &&
+    secsUntil(otpSentAtRef.current + OTP_EXPIRY_SECONDS * 1000) > 0;
+
+  const clearPersistedState = () => {
+    [LS_EMAIL, LS_STEP, LS_OTP_SENT_AT, LS_RESEND_AT, LS_BLOCKED_UNTIL, LS_RESEND_COUNT, LS_VERIFIED_OTP]
+      .forEach(k => localStorage.removeItem(k));
+    verifiedOtpRef.current = '';
+  };
+
   const startTick = useCallback(() => {
     if (tickRef.current) clearInterval(tickRef.current);
     tickRef.current = setInterval(() => {
@@ -177,25 +213,21 @@ const ForgotPassword = () => {
     }, 1000);
   }, []);
 
-  // Refs so the interval closure always sees current values without re-creating the interval
-  const otpSentAtRef     = useRef(otpSentAt);
-  const resendAtRef      = useRef(resendAt);
-  const blockedUntilRef  = useRef(blockedUntil);
-
-  useEffect(() => { otpSentAtRef.current    = otpSentAt;    }, [otpSentAt]);
-  useEffect(() => { resendAtRef.current     = resendAt;     }, [resendAt]);
-  useEffect(() => { blockedUntilRef.current = blockedUntil; }, [blockedUntil]);
-
-  // ── On mount: restore state and check server for block status ─────────────
   useEffect(() => {
+    // FIX: if the step computed at mount-time landed back on 1 because the
+    // persisted OTP session was stale, wipe the leftover localStorage keys now
+    // so they don't resurrect on the next refresh either.
+    const persistedStep = Number(localStorage.getItem(LS_STEP) || '1');
+    if (persistedStep > 1 && step === 1) {
+      clearPersistedState();
+    }
+
     startTick();
 
-    // If we have an email and were on step 2, verify server-side block status.
-    // This is the key piece: even if localStorage is cleared, the server still knows.
     const savedEmail = localStorage.getItem(LS_EMAIL);
     const savedStep  = Number(localStorage.getItem(LS_STEP) || '1');
 
-    if (savedEmail && savedStep === 2) {
+    if (savedEmail && savedStep === 2 && step === 2) {
       axios.post(`${API_BASE_URL}/otp-status`, { email: savedEmail })
         .then(({ data }) => {
           if (data.isBlocked && data.blockedUntil) {
@@ -204,24 +236,20 @@ const ForgotPassword = () => {
             blockedUntilRef.current = until;
             localStorage.setItem(LS_BLOCKED_UNTIL, String(until));
           }
-          // Sync attempt count from server (authoritative source)
           if (typeof data.attemptsUsed === 'number') {
-            // attemptsUsed counts how many times /forgot-password was called
-            // Our resendCount = attemptsUsed - 1 (first send is not a "resend")
             const serverResendCount = Math.max(0, data.attemptsUsed - 1);
             setResendCount(serverResendCount);
             localStorage.setItem(LS_RESEND_COUNT, String(serverResendCount));
           }
         })
-        .catch(() => {/* network error — use localStorage values */});
+        .catch(() => {});
     }
 
     return () => { if (tickRef.current) clearInterval(tickRef.current); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Persist to localStorage whenever key values change ────────────────────
-  useEffect(() => { localStorage.setItem(LS_STEP, String(step)); }, [step]);
-  useEffect(() => { localStorage.setItem(LS_EMAIL, email); }, [email]);
+  useEffect(() => { localStorage.setItem(LS_STEP,  String(step));  }, [step]);
+  useEffect(() => { localStorage.setItem(LS_EMAIL, email);         }, [email]);
   useEffect(() => { if (otpSentAt) localStorage.setItem(LS_OTP_SENT_AT, String(otpSentAt)); }, [otpSentAt]);
   useEffect(() => { if (resendAt)  localStorage.setItem(LS_RESEND_AT,   String(resendAt));  }, [resendAt]);
   useEffect(() => {
@@ -230,13 +258,6 @@ const ForgotPassword = () => {
   }, [blockedUntil]);
   useEffect(() => { localStorage.setItem(LS_RESEND_COUNT, String(resendCount)); }, [resendCount]);
 
-  // ── Clear all persisted state (called on successful reset or back-to-step-1) ─
-  const clearPersistedState = () => {
-    [LS_EMAIL, LS_STEP, LS_OTP_SENT_AT, LS_RESEND_AT, LS_BLOCKED_UNTIL, LS_RESEND_COUNT]
-      .forEach(k => localStorage.removeItem(k));
-  };
-
-  // Helper: record that an OTP was just sent right now
   const recordOtpSent = (serverBlockedUntil?: string | null) => {
     const sentAt = now();
     setOtpSentAt(sentAt);
@@ -244,7 +265,6 @@ const ForgotPassword = () => {
     setResendAt(sentAt);
     resendAtRef.current = sentAt;
 
-    // Recompute derived values immediately (don't wait for next tick)
     setOtpSecsLeft(OTP_EXPIRY_SECONDS);
     setResendSecsLeft(RESEND_COOLDOWN_SECS);
 
@@ -256,34 +276,32 @@ const ForgotPassword = () => {
     }
   };
 
-  // ── Input change ──────────────────────────────────────────────────────────
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     if (name === 'email') { setEmail(value); return; }
     if (name === 'otp') {
-      setFormData(prev => ({ ...prev, otp: value.replace(/\D/g, '').slice(0, 6) }));
+      // FIX: strip non-digits, trim whitespace, limit to 6 chars
+      setFormData(prev => ({ ...prev, otp: value.replace(/\D/g, '').trim().slice(0, 6) }));
       return;
     }
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  // ── Step 1: Send OTP ──────────────────────────────────────────────────────
   const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email) { toast.error('Please enter your email address'); return; }
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) { toast.error('Please enter your email address'); return; }
 
     setLoading(true);
     try {
-      await axios.post(`${API_BASE_URL}/forgot-password`, { email });
-
-      // First send counts as resend 0 — user still has MAX_RESENDS left
+      await axios.post(`${API_BASE_URL}/forgot-password`, { email: trimmedEmail });
+      setEmail(trimmedEmail);
       setResendCount(0);
       recordOtpSent();
       setStep(2);
       toast.success('OTP sent to your email! Valid for 5 minutes.');
     } catch (error: any) {
       const data = error.response?.data;
-      // If server says blocked, capture the timestamp so we can show the right timer
       if (error.response?.status === 429 && data?.blockedUntil) {
         const until = new Date(data.blockedUntil).getTime();
         setBlockedUntil(until);
@@ -296,18 +314,19 @@ const ForgotPassword = () => {
     }
   };
 
-  // ── Resend OTP ────────────────────────────────────────────────────────────
   const handleResendOTP = async () => {
-    // Guard: respect both client-side counts AND server block
     if (resendCount >= MAX_RESENDS) { toast.error('Maximum resend attempts reached'); return; }
     if (resendSecsLeft > 0)         { return; }
     if (blockSecsLeft > 0)          { return; }
 
     setLoading(true);
+    // FIX: clear OTP field AND the verified OTP ref on resend
     setFormData(prev => ({ ...prev, otp: '' }));
-    try {
-      await axios.post(`${API_BASE_URL}/forgot-password`, { email });
+    verifiedOtpRef.current = '';
+    localStorage.removeItem(LS_VERIFIED_OTP);
 
+    try {
+      await axios.post(`${API_BASE_URL}/forgot-password`, { email: email.trim() });
       const newCount = resendCount + 1;
       setResendCount(newCount);
       recordOtpSent();
@@ -324,39 +343,68 @@ const ForgotPassword = () => {
       toast.error(data?.message || 'Failed to resend OTP');
     } finally {
       setLoading(false);
+
     }
   };
 
   // ── Step 2: Verify OTP ────────────────────────────────────────────────────
   const handleVerifyOTP = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.otp)               { toast.error('Please enter the OTP'); return; }
-    if (formData.otp.length !== 6)   { toast.error('OTP must be exactly 6 digits'); return; }
-    if (otpSecsLeft === 0)           { toast.error('OTP has expired. Please request a new one.'); return; }
+  if (loading) return;
+    // FIX: always trim the OTP before validation and sending
+    const otp = formData.otp.trim();
+
+    if (!otp)         { toast.error('Please enter the OTP'); return; }
+    if (otp.length !== 6) { toast.error('OTP must be exactly 6 digits'); return; }
+
+    // Use ref-based check (never stale)
+    if (!isOtpStillValid()) {
+      toast.error('OTP has expired. Please request a new one.');
+      return;
+    }
 
     setLoading(true);
     try {
-      await axios.post(`${API_BASE_URL}/verify-otp`, { email, otp: formData.otp });
+      // FIX: send trimmed OTP; some backends are strict about extra whitespace/chars
+      await axios.post(`${API_BASE_URL}/verify-otp`, {
+        email: email.trim(),
+        otp,                  // already trimmed above
+      });
+
+      // FIX: save the verified OTP in a ref AND localStorage so step 3 can use it
+      verifiedOtpRef.current = otp;
+      localStorage.setItem(LS_VERIFIED_OTP, otp);
+
       if (tickRef.current) clearInterval(tickRef.current);
       setStep(3);
       toast.success('OTP verified! Please set your new password.');
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Invalid or expired OTP.');
+      const msg = error.response?.data?.message || 'Invalid or expired OTP.';
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  // ── Step 3: Reset Password ────────────────────────────────────────────────
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isPasswordStrong(formData.newPassword))           { toast.error('Password does not meet strength requirements'); return; }
     if (formData.newPassword !== formData.confirmPassword) { toast.error('Passwords do not match'); return; }
 
+    // FIX: use the verified OTP from the ref, not formData.otp which may be empty in step 3
+    const otpToSend = verifiedOtpRef.current;
+    if (!otpToSend) {
+      toast.error('Session expired. Please start over.');
+      handleBackToEmail();
+      return;
+    }
+
     setLoading(true);
     try {
       await axios.post(`${API_BASE_URL}/reset-password`, {
-        email, otp: formData.otp, newPassword: formData.newPassword,
+        email:       email.trim(),
+        otp:         otpToSend,
+        newPassword: formData.newPassword,
       });
       clearPersistedState();
       toast.success('Password reset successfully! Please log in.');
@@ -368,7 +416,6 @@ const ForgotPassword = () => {
     }
   };
 
-  // ── Go back to step 1 ─────────────────────────────────────────────────────
   const handleBackToEmail = () => {
     clearPersistedState();
     if (tickRef.current) clearInterval(tickRef.current);
@@ -382,23 +429,25 @@ const ForgotPassword = () => {
     setResendSecsLeft(0);
     setBlockSecsLeft(0);
     setFormData({ otp: '', newPassword: '', confirmPassword: '' });
+    otpSentAtRef.current    = null;
+    resendAtRef.current     = null;
+    blockedUntilRef.current = null;
   };
 
-  // ── Derived booleans used in render ──────────────────────────────────────
-  const otpExpired        = otpSentAt !== null && otpSecsLeft === 0 && step === 2;
-  const isServerBlocked   = blockSecsLeft > 0;
-  const resendExhausted   = resendCount >= MAX_RESENDS;
-  const resendOnCooldown  = resendSecsLeft > 0;
-  const canResend         = !isServerBlocked && !resendExhausted && !resendOnCooldown && !loading;
+  // Derived booleans for UI rendering (state-based, fine for display)
+  const otpExpired       = otpSentAt !== null && otpSecsLeft === 0 && step === 2;
+  const isServerBlocked  = blockSecsLeft > 0;
+  const resendExhausted  = resendCount >= MAX_RESENDS;
+  const resendOnCooldown = resendSecsLeft > 0;
+  const canResend        = !isServerBlocked && !resendExhausted && !resendOnCooldown && !loading;
 
-  // Format block countdown as HH:MM:SS
   const fmtBlock = (s: number) => {
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
+    const h   = Math.floor(s / 3600);
+    const m   = Math.floor((s % 3600) / 60);
     const sec = s % 60;
     return h > 0
-      ? `${h}h ${String(m).padStart(2,'0')}m ${String(sec).padStart(2,'0')}s`
-      : `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+      ? `${h}h ${String(m).padStart(2, '0')}m ${String(sec).padStart(2, '0')}s`
+      : `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
   };
 
   // ─── Step Renderers ───────────────────────────────────────────────────────
@@ -434,8 +483,6 @@ const ForgotPassword = () => {
 
   const renderStep2 = () => (
     <form onSubmit={handleVerifyOTP} className="space-y-6">
-
-      {/* ── Server block banner ── */}
       {isServerBlocked && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
           <div className="text-red-600 font-semibold text-sm mb-1">🔒 Too many OTP requests</div>
@@ -446,7 +493,6 @@ const ForgotPassword = () => {
         </div>
       )}
 
-      {/* ── OTP expiry timer ── */}
       <div className="flex flex-col items-center gap-2">
         {otpExpired ? (
           <div className="text-red-500 text-sm font-semibold text-center">⏰ OTP Expired</div>
@@ -458,7 +504,6 @@ const ForgotPassword = () => {
         </p>
       </div>
 
-      {/* ── OTP input ── */}
       <div>
         <label htmlFor="otp" className="block text-sm font-medium text-gray-700 mb-2">
           Enter 6-Digit OTP
@@ -481,7 +526,6 @@ const ForgotPassword = () => {
         </p>
       </div>
 
-      {/* ── Back / Verify buttons ── */}
       <div className="flex space-x-3">
         <button
           type="button" onClick={handleBackToEmail}
@@ -500,7 +544,6 @@ const ForgotPassword = () => {
         </button>
       </div>
 
-      {/* ── Resend section ── */}
       <div className="text-center space-y-1">
         {isServerBlocked ? (
           <p className="text-xs text-red-500">
@@ -524,7 +567,6 @@ const ForgotPassword = () => {
             }
           </button>
         )}
-        {/* Attempt indicator dots */}
         <div className="flex justify-center gap-2 mt-2">
           {Array.from({ length: MAX_RESENDS + 1 }).map((_, i) => (
             <div
@@ -599,8 +641,6 @@ const ForgotPassword = () => {
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-green-50
                     flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
-
-        {/* Header */}
         <div className="text-center">
           <div className="flex justify-center">
             <div className="bg-green-600 p-3 rounded-2xl shadow-lg">
@@ -611,7 +651,6 @@ const ForgotPassword = () => {
           <p className="mt-2 text-sm text-gray-600">{STEP_META[step - 1].desc}</p>
         </div>
 
-        {/* Step progress */}
         <div className="flex items-center justify-center gap-3">
           {[1, 2, 3].map(n => (
             <React.Fragment key={n}>
@@ -630,7 +669,6 @@ const ForgotPassword = () => {
           ))}
         </div>
 
-        {/* Card */}
         <div className="bg-white rounded-2xl shadow-xl p-8">
           {step === 1 && renderStep1()}
           {step === 2 && renderStep2()}
