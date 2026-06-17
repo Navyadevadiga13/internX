@@ -22,7 +22,6 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 5006;
@@ -306,43 +305,24 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname).toLowerCase();
-cb(null, file.fieldname + '-' + uniqueSuffix + ext);
+    cb(null, file.fieldname + '-' + uniqueSuffix + '.' + file.originalname.split('.').pop());
   }
 });
 
 const upload = multer({
   storage: storage,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
-fileFilter: (req, file, cb) => {
-
-  // Excel files
-  if (file.fieldname === 'excel') {
-    const allowedExcel = [
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    ];
-
-    if (allowedExcel.includes(file.mimetype)) {
-      return cb(null, true);
+  fileFilter: (req, file, cb) => {
+    if (file.fieldname === 'excel') {
+      if (file.mimetype.includes('spreadsheet') || file.originalname.endsWith('.xlsx') || file.originalname.endsWith('.xls')) {
+        cb(null, true);
+      } else {
+        cb(new Error('Only Excel files are allowed'), false);
+      }
+    } else {
+      cb(null, true);
     }
-
-    return cb(new Error('Only Excel files are allowed'), false);
   }
-
-  // Resume files
-  const allowedResume = [
-    'application/pdf',
-    'application/msword',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-  ];
-
-  if (allowedResume.includes(file.mimetype)) {
-    return cb(null, true);
-  }
-
-  return cb(new Error('Only PDF, DOC and DOCX files are allowed'), false);
-}
 });
 
 
