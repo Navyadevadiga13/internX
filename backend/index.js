@@ -44,12 +44,18 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Create uploads directory if it doesn't exist
+// Create uploads directory if it doesn't exist
 const uploadsDir = join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
-// server static file
-app.use('/uploads', express.static(join(__dirname, 'uploads')));
+
+// Only expose company logos publicly
+app.use(
+  '/uploads/company-logos',
+  express.static(join(__dirname, 'uploads', 'company-logos'))
+);
+
 // MongoDB connection
 const MONGODB_URI = process.env.MONGODB_URI;
 
@@ -1609,11 +1615,27 @@ app.post('/api/register', withDB(async (req, res) => {
       studyPreference 
     } = req.body;
 
-    // 2. Verify OTP
-    const otpRecord = await OTP.findOne({ email, otp });
-    if (!otpRecord) {
-      return res.status(400).json({ message: 'Invalid or expired OTP' });
-    }
+  // 2. Validate required fields
+if (
+  !name ||
+  !email ||
+  !password ||
+  !phone ||
+  !otp ||
+  !currentCity ||
+  !pinCode ||
+  !studyPreference
+) {
+  return res.status(400).json({
+    message: 'All fields are required'
+  });
+}
+
+// 3. Verify OTP
+const otpRecord = await OTP.findOne({ email, otp });
+if (!otpRecord) {
+  return res.status(400).json({ message: 'Invalid or expired OTP' });
+}
 
     // 3. Check if user already exists
     const existingUser = await User.findOne({ email });
@@ -1632,7 +1654,7 @@ app.post('/api/register', withDB(async (req, res) => {
       phone,
       currentCity,
       pinCode,
-      studyPreference: studyPreference || 'India', // Keeping default just in case
+    studyPreference, // Keeping default just in case
       isVerified: true
     };
 
@@ -2778,22 +2800,50 @@ if (applicationsTodayCount >= maxApplications) {
 }));
 
 
-app.get('/api/resume/:userId', withDB(async (req, res) => {
-  try {
-    const user = await User.findById(req.params.userId);
-    if (!user || !user.resume) {
-      return res.status(404).json({ message: 'Resume not found' });
-    }
+app.get(
+  '/api/resume/:userId',
+  authenticateToken,
+  withDB(async (req, res) => {
+    try {
+      const { userId } = req.params;
 
-    const resumeBuffer = Buffer.from(user.resume, 'base64');
-    res.setHeader('Content-Type', user.resumeContentType || 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${user.resumeFilename || 'resume.pdf'}"`);
-    res.send(resumeBuffer);
-  } catch (error) {
-    console.error('Error downloading resume:', error);
-    res.status(500).json({ message: 'Failed to download resume' });
-  }
-}));
+      // Only allow users to access their own resume
+      if (req.user.userId !== userId) {
+        return res.status(403).json({
+          message: 'Access denied'
+        });
+      }
+
+      const user = await User.findById(userId);
+
+      if (!user || !user.resume) {
+        return res.status(404).json({
+          message: 'Resume not found'
+        });
+      }
+
+      const resumeBuffer = Buffer.from(user.resume, 'base64');
+
+      res.setHeader(
+        'Content-Type',
+        user.resumeContentType || 'application/pdf'
+      );
+
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${user.resumeFilename || 'resume.pdf'}"`
+      );
+
+      res.send(resumeBuffer);
+
+    } catch (error) {
+      console.error('Error downloading resume:', error);
+      res.status(500).json({
+        message: 'Failed to download resume'
+      });
+    }
+  })
+);
 
 // Get profile picture
 app.get('/api/profile-picture/:userId', withDB(async (req, res) => {
