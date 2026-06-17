@@ -70,7 +70,7 @@ const Navbar = () => {
             
               {user && (
               <a // Use a standard <a> tag for external links
-                href={token ? `https://ai.internx.io/?token=${token}` : "/login"} // Build the URL dynamically with the token
+                href={token ? `https://ai.internx.io` : "/login"} // Build the URL dynamically with the token
                 target="_blank" // Open in a new tab
                 rel="noopener noreferrer"
                 className="flex items-center space-x-2 px-4 py-2.5 text-gray-700 hover:text-green-600 hover:bg-green-50 rounded-xl transition-all duration-300 font-medium group"
@@ -210,7 +210,7 @@ const Navbar = () => {
 
             {user && (
                 <a // Use a standard <a> tag
-                  href={token ? `https://ai.internx.io/?token=${token}` : "/login"} // Build the URL dynamically
+                  href={token ? `https://ai.internx.io` : "/login"} // Build the URL dynamically
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={closeMenu}
