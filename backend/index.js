@@ -15,7 +15,7 @@ import { dirname, join } from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
 import cron from 'node-cron';
-
+import mongoSanitize from 'express-mongo-sanitize';
 
 
 dotenv.config();
@@ -38,7 +38,8 @@ const corsOptions = {
   credentials: true,
   optionsSuccessStatus: 200
 };
-
+app.use(express.json());
+app.use(mongoSanitize());
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -595,25 +596,38 @@ app.get('/api/system-settings', withDB(async (req, res) => {
 app.post('/api/send-otp', withDB(async (req, res) => {
   try {
     const { email } = req.body;
+    if (typeof email !== 'string') {
+  return res.status(400).json({
+    message: 'Invalid email'
+  });
+}
+const safeEmail = email.trim().toLowerCase();
 
     if (!email) {
       return res.status(400).json({ message: 'Email is required' });
     }
 
     // Check if user already exists
-    const existingUser = await User.findOne({ email });
+ const existingUser = await User.findOne({
+  email: safeEmail
+});
     if (existingUser) {
       return res.status(400).json({ message: 'User with this email already exists' });
     }
 
     const otp = generateOTP();
-
+if (typeof email !== 'string') {
+  return res.status(400).json({
+    message: 'Invalid email'
+  });
+}
+const safeEmail = email.toLowerCase().trim();
     // Save OTP to database
-    await OTP.findOneAndUpdate(
-      { email },
-      { email, otp },
-      { upsert: true, new: true }
-    );
+await OTP.findOneAndUpdate(
+  { email: safeEmail },
+  { email: safeEmail, otp },
+  { upsert: true, new: true }
+);
 
     // Send OTP email
     const emailHtml = `
@@ -641,12 +655,19 @@ app.post('/api/send-otp', withDB(async (req, res) => {
 app.post('/api/forgot-password', withDB(async (req, res) => {
   try {
     const { email } = req.body;
-
+if (typeof email !== 'string') {
+  return res.status(400).json({
+    message: 'Invalid email'
+  });
+}
+const safeEmail = email.trim().toLowerCase();
     if (!email) {
       return res.status(400).json({ message: 'Email is required' });
     }
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({
+  email: safeEmail
+});
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -691,9 +712,18 @@ await PasswordResetOTP.findOneAndUpdate(
 app.post('/api/verify-otp', withDB(async (req, res) => {
   try {
     const { email, otp } = req.body;
+    if (
+  typeof email !== 'string' ||
+  typeof otp !== 'string'
+) {
+  return res.status(400).json({
+    message: 'Invalid input'
+  });
+}const safeEmail = email.toLowerCase().trim();
+const safeOtp = otp.trim();
 
-    const otpRecord = await PasswordResetOTP.findOne({
-  email: email.toLowerCase().trim()
+const otpRecord = await PasswordResetOTP.findOne({
+  email: safeEmail
 });
 
   
@@ -722,6 +752,15 @@ app.post('/api/verify-otp', withDB(async (req, res) => {
 app.post('/api/reset-password', withDB(async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
+    if (
+  typeof email !== 'string' ||
+  typeof otp !== 'string' ||
+  typeof newPassword !== 'string'
+) {
+  return res.status(400).json({
+    message: 'Invalid input'
+  });
+}
 
     if (!email || !otp || !newPassword) {
       return res.status(400).json({ message: 'Email, OTP, and new password are required' });
@@ -847,13 +886,19 @@ app.post("/api/company_reset_password", authenticateCompany, async (req, res) =>
 app.post('/api/company-send-otp', withDB(async (req, res) => {
   try {
     const { email } = req.body;
-
+if (typeof email !== 'string') {
+  return res.status(400).json({
+    message: 'Invalid email'
+  });
+}
     if (!email) {
       return res.status(400).json({ message: 'Email is required' });
     }
-
+const safeEmail = email.trim().toLowerCase();
     // Check if company exists
-    const existingCompany = await Company.findOne({ email });
+    const existingCompany = await Company.findOne({
+  email: safeEmail
+});
     if (!existingCompany) {
       return res.status(404).json({ message: 'Company not found' });
     }
@@ -892,12 +937,24 @@ app.post('/api/company-send-otp', withDB(async (req, res) => {
 app.post('/api/company-forgot-password', withDB(async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
+    if (
+  typeof email !== 'string' ||
+  typeof otp !== 'string' ||
+  typeof newPassword !== 'string'
+) {
+  return res.status(400).json({
+    message: 'Invalid input'
+  });
+}
+const safeEmail = email.trim().toLowerCase();
 
     if (!email || !otp || !newPassword) {
       return res.status(400).json({ message: 'Email, OTP and newPassword are required' });
     }
 
-    const otpRecord = await OTP.findOne({ email });
+    const otpRecord = await OTP.findOne({
+  email: safeEmail
+});
     if (!otpRecord) return res.status(400).json({ message: 'OTP not found. Please request again.' });
 
     if (String(otpRecord.otp).trim() !== String(otp).trim()) return res.status(400).json({ message: 'Invalid OTP' });
@@ -1696,8 +1753,18 @@ app.put('/api/profile', authenticateToken, withDB(async (req, res) => {
 app.post('/api/admin/login', withDB(async (req, res) => {
   try {
     const { username, password } = req.body;
-
-    const admin = await Admin.findOne({ username });
+    if (
+  typeof username !== 'string' ||
+  typeof password !== 'string'
+) {
+  return res.status(400).json({
+    message: 'Invalid credentials'
+  });
+}
+const safeUsername = username.trim();
+   const admin = await Admin.findOne({
+  username: safeUsername
+});
     if (!admin) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
@@ -1925,9 +1992,13 @@ app.get('/api/jobs/:id', withDB(async (req, res) => {
 // Check if user has applied for a job
 app.get('/api/jobs/:id/application-status', authenticateToken, withDB(async (req, res) => {
   try {
-    const jobId = req.params.id;
-    const userId = req.user.userId;
-
+    const jobId = String(req.params.id).trim();
+   const userId = String(req.user.userId).trim();
+if (!jobId || !userId) {
+  return res.status(400).json({
+    message: 'Invalid request'
+  });
+}
     const application = await Application.findOne({ jobId, userId });
 
     res.json({
@@ -1996,7 +2067,11 @@ app.post('/api/jobs/:id/apply', authenticateToken, withDB(async (req, res) => {
     const { coverLetter } = req.body;
     const jobId = req.params.id;
     const userId = req.user.userId;
-
+if (!mongoose.Types.ObjectId.isValid(userId)) {
+  return res.status(400).json({
+    message: 'Invalid user ID'
+  });
+}
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
@@ -2006,7 +2081,11 @@ app.post('/api/jobs/:id/apply', authenticateToken, withDB(async (req, res) => {
         requiresResume: true
       });
     }
-
+if (!mongoose.Types.ObjectId.isValid(jobId)) {
+  return res.status(400).json({
+    message: 'Invalid job ID'
+  });
+}
     const job = await Job.findById(jobId);
     if (!job) return res.status(404).json({ message: 'Internship not found' });
 
@@ -2203,7 +2282,11 @@ app.get(
           message: 'Access denied'
         });
       }
-
+if (!mongoose.Types.ObjectId.isValid(userId)) {
+  return res.status(400).json({
+    message: 'Invalid user ID'
+  });
+}
       const user = await User.findById(userId);
 
       if (!user || !user.resume) {
