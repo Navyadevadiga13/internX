@@ -545,7 +545,7 @@ const CompanyRegister: React.FC = () => {
                         onChange={handleChange}
                         className="w-full pl-11 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
                         placeholder="2020"
-                        min="1800"
+                        min="70"
                         max={new Date().getFullYear()}
                       />
                     </div>

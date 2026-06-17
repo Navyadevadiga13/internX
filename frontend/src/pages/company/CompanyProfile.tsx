@@ -455,7 +455,7 @@ const CompanyProfile: React.FC = () => {
                         onChange={handleInputChange}
                         className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-green-500 transition-all"
                         placeholder="2020"
-                        min={1800}
+                        min={70}
                         max={new Date().getFullYear()}
                       />
                     </div>

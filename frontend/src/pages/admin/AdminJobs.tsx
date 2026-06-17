@@ -645,7 +645,7 @@ const handleReplaceLocation = async () => {
       className="px-2 py-2 rounded border border-gray-600 text-gray-900"
       value={deleteLocation}
       onChange={e => setDeleteLocation(e.target.value)}
-      style={{ minWidth: '180px' }}
+      style={{ minWidth: '7px' }}
     >
       <option value="">All Locations</option>
       {uniqueLocations.map(loc => (
@@ -667,7 +667,7 @@ const handleReplaceLocation = async () => {
       className="px-2 py-2 rounded border border-gray-600 text-gray-900"
       value={replaceOldLocation}
       onChange={e => setReplaceOldLocation(e.target.value)}
-      style={{ minWidth: '180px' }}
+      style={{ minWidth: '7px' }}
     >
       <option value="">Select old location</option>
       {uniqueLocations.map(loc => (

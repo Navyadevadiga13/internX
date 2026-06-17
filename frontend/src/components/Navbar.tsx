@@ -96,7 +96,7 @@ const Navbar = () => {
                       <User className="h-4 w-4 text-white" />
                     </div>
                     <span className="font-medium hidden xl:block">{user.name}</span>
-                    <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${showUserDropdown ? 'rotate-180' : ''}`} />
+                    <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${showUserDropdown ? 'rotate-7' : ''}`} />
                   </button>
                   
                   {showUserDropdown && (
@@ -129,7 +129,7 @@ const Navbar = () => {
                     className="flex items-center space-x-2 text-gray-700 hover:text-green-600 px-4 py-2.5 rounded-xl hover:bg-green-50 transition-all duration-300 font-medium"
                   >
                     <span>Login</span>
-                    <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${showLoginDropdown ? 'rotate-180' : ''}`} />
+                    <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${showLoginDropdown ? 'rotate-7' : ''}`} />
                   </button>
                   
                   {showLoginDropdown && (
@@ -160,7 +160,7 @@ const Navbar = () => {
                     className="flex items-center space-x-2 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white px-6 py-2.5 rounded-xl transition-all duration-300 font-medium shadow-lg hover:shadow-green-200 hover:scale-105"
                   >
                     <span>Sign Up</span>
-                    <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${showSignupDropdown ? 'rotate-180' : ''}`} />
+                    <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${showSignupDropdown ? 'rotate-7' : ''}`} />
                   </button>
                   
                   {showSignupDropdown && (

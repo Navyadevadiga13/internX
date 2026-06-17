@@ -1529,7 +1529,7 @@ if (!otpRecord) {
     const token = jwt.sign(
       { userId: user._id, email: user.email, role: 'user' },
       process.env.JWT_SECRET,
-      { expiresIn: '180d' }
+      { expiresIn: '7d' }
     );
 
     // 9. Send welcome email
@@ -1588,7 +1588,7 @@ app.post('/api/login', withDB(async (req, res) => {
     const token = jwt.sign(
       { userId: user._id, email: user.email, role: 'user' },
       process.env.JWT_SECRET ,
-      { expiresIn: '180d' }
+      { expiresIn: '7d' }
     );
 
     res.json({
@@ -1713,7 +1713,7 @@ app.post('/api/admin/login', withDB(async (req, res) => {
     const token = jwt.sign(
       { adminId: admin._id, username: admin.username, role: 'admin' },
       process.env.JWT_SECRET ,
-      { expiresIn: '180d' }
+      { expiresIn: '7d' }
     );
 
     res.json({
