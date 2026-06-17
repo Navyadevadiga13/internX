@@ -265,23 +265,6 @@ const applicationSchema = new mongoose.Schema({
 
 const Application = mongoose.model('Application', applicationSchema);
 
-// const applicationSchema = new mongoose.Schema({
-//   jobId: { type: mongoose.Schema.Types.ObjectId, ref: 'Job', required: true },
-//   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-//   status: {
-//     type: String,
-//     enum: ['Pending', 'sent', 'undelivered', 'application received'],
-//     default: 'Pending'
-//   },
-//   coverLetter: String,
-//   appliedAt: { type: Date, default: Date.now },
-//   reviewedAt: Date,
-//   reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
-//   notes: String
-// }, { timestamps: true });
-
-// const Application = mongoose.model('Application', applicationSchema);
-
 // Excel File Schema
 const excelFileSchema = new mongoose.Schema({
   filename: { type: String, required: true },
@@ -671,11 +654,15 @@ app.post('/api/forgot-password', withDB(async (req, res) => {
     const otp = generateOTP();
 
     // Save OTP to database
-    await PasswordResetOTP.findOneAndUpdate(
-      { email },
-      { email, otp },
-      { upsert: true, new: true }
-    );
+await PasswordResetOTP.findOneAndUpdate(
+  { email: email.toLowerCase().trim() },
+  {
+    email: email.toLowerCase().trim(),
+    otp: String(otp),
+    expiresAt: new Date(Date.now() + 5 * 60 * 1000) // 5 minutes
+  },
+  { upsert: true, new: true }
+);
 
     // Send OTP email
     const emailHtml = `
@@ -701,44 +688,33 @@ app.post('/api/forgot-password', withDB(async (req, res) => {
   }
 }));
 
-// Verify Password Reset OTP
 app.post('/api/verify-otp', withDB(async (req, res) => {
   try {
     const { email, otp } = req.body;
 
-    // 1. Basic input validation
-    if (!email || !otp) {
-      return res.status(400).json({ message: 'Email and OTP are required' });
-    }
+    const otpRecord = await PasswordResetOTP.findOne({
+  email: email.toLowerCase().trim()
+});
 
-    if (!/^\d{6}$/.test(otp)) {
-      return res.status(400).json({ message: 'OTP must be exactly 6 digits' });
-    }
-
-    // 2. Look up OTP record by email
-    const otpRecord = await PasswordResetOTP.findOne({ email });
+  
 
     if (!otpRecord) {
-      return res.status(400).json({ message: 'No OTP found for this email. Please request a new one.' });
+      return res.status(400).json({ message: "No OTP found" });
     }
 
-    // 3. Check if OTP has expired
     if (new Date() > otpRecord.expiresAt) {
-      await PasswordResetOTP.deleteOne({ email });
-      return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
+      return res.status(400).json({ message: "Expired OTP" });
     }
 
-    // 4. Check if OTP matches exactly
-    if (otpRecord.otp !== otp) {
-      return res.status(400).json({ message: 'Invalid OTP. Please check and try again.' });
+
+    if (String(otpRecord.otp).trim() !== String(otp).trim()) {
+      return res.status(400).json({ message: "Invalid OTP" });
     }
 
-    // 5. OTP is valid — do NOT delete it yet, /reset-password still needs it
-    return res.status(200).json({ message: 'OTP verified successfully' });
+    return res.status(200).json({ message: "OTP verified successfully" });
 
-  } catch (error) {
-    console.error('Error verifying OTP:', error);
-    res.status(500).json({ message: 'Failed to verify OTP' });
+  } catch (err) {
+    return res.status(500).json({ message: "Server error" });
   }
 }));
 
@@ -751,14 +727,24 @@ app.post('/api/reset-password', withDB(async (req, res) => {
       return res.status(400).json({ message: 'Email, OTP, and new password are required' });
     }
 
-    // Verify OTP
-    const otpRecord = await PasswordResetOTP.findOne({ email, otp });
+    const normalizedEmail = email.toLowerCase().trim();
+    const normalizedOtp   = String(otp).trim();
+
+    // Verify OTP (normalize email/otp the same way forgot-password and verify-otp do)
+    const otpRecord = await PasswordResetOTP.findOne({ email: normalizedEmail, otp: normalizedOtp });
     if (!otpRecord) {
       return res.status(400).json({ message: 'Invalid or expired OTP' });
     }
 
+    // FIX: findOne above only confirms a matching record exists — it never checked
+    // expiry, so an expired OTP could still be used to reset the password. Check it now.
+    if (new Date() > otpRecord.expiresAt) {
+      await PasswordResetOTP.deleteOne({ _id: otpRecord._id });
+      return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
+    }
+
     // Find user
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -770,7 +756,7 @@ app.post('/api/reset-password', withDB(async (req, res) => {
     await User.findByIdAndUpdate(user._id, { password: hashedPassword });
 
     // Delete OTP after successful reset
-    await PasswordResetOTP.deleteOne({ email, otp });
+    await PasswordResetOTP.deleteOne({ _id: otpRecord._id });
 
     // Send confirmation email
     const confirmationEmailHtml = `
@@ -914,7 +900,7 @@ app.post('/api/company-forgot-password', withDB(async (req, res) => {
     const otpRecord = await OTP.findOne({ email });
     if (!otpRecord) return res.status(400).json({ message: 'OTP not found. Please request again.' });
 
-    if (otpRecord.otp !== otp) return res.status(400).json({ message: 'Invalid OTP' });
+    if (String(otpRecord.otp).trim() !== String(otp).trim()) return res.status(400).json({ message: 'Invalid OTP' });
     if (otpRecord.expiresAt < new Date()) return res.status(400).json({ message: 'OTP expired. Please request again.' });
 
     const company = await Company.findOne({ email });
@@ -1475,131 +1461,6 @@ app.post('/api/company_deactivate', authenticateCompany, async (req, res) => {
 });
 
 
-// User Registration
-// app.post('/api/register', withDB(async (req, res) => {
-//   try {
-//     const {
-//       name, email, password, phone, otp, currentCity,pinCode, futureGoals, studyPreference, section, higherEducation,
-//       twelfthPU, ugDegree, pgMasters, skills, keywords,
-//       resumeData, resumeFilename, resumeContentType,
-//       profilePictureData, profilePictureFilename, profilePictureContentType, currentAcademicStatus
-//     } = req.body;
-
-//     // Verify OTP
-//     const otpRecord = await OTP.findOne({ email, otp });
-//     if (!otpRecord) {
-//       return res.status(400).json({ message: 'Invalid or expired OTP' });
-//     }
-
-//     // Check if user already exists
-//     const existingUser = await User.findOne({ email });
-//     if (existingUser) {
-//       return res.status(400).json({ message: 'User already exists' });
-//     }
-
-//     // Hash password
-//     const hashedPassword = await bcrypt.hash(password, 10);
-
-//     // Create user
-//     const userData = {
-//       name,
-//       email,
-//       password: hashedPassword,
-//       phone,
-//       currentCity,
-//       pinCode,
-//       futureGoals,
-   
-//       studyPreference: studyPreference || 'India',
-//       section,
-//       higherEducation,
-//       twelfthPU,
-//       ugDegree,
-//       pgMasters,
-//       skills: skills || [],
-//       keywords: keywords || [],
-//       isVerified: true,
-//       currentAcademicStatus
-//     };
-
-//     // Handle resume
-//     if (resumeData) {
-//       userData.resume = resumeData;
-//       userData.resumeFilename = resumeFilename;
-//       userData.resumeContentType = resumeContentType;
-//     }
-
-//     // Handle profile picture
-//     if (profilePictureData) {
-//       userData.profilePicture = profilePictureData;
-//       userData.profilePictureFilename = profilePictureFilename;
-//       userData.profilePictureContentType = profilePictureContentType;
-//     }
-
-//     const user = await User.create(userData);
-
-//     // Delete OTP after successful registration
-//     await OTP.deleteOne({ email, otp });
-
-//     // Generate JWT token
-//     const token = jwt.sign(
-//       { userId: user._id, email: user.email, role: 'user' },
-//       process.env.JWT_SECRET ,
-//       { expiresIn: '180d' }
-//     );
-
-//     // Send welcome email
-//     const welcomeEmailHtml = `
-//       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-//         <h2 style="color: #16a34a;">Welcome to InternX, ${name}!</h2>
-//         <p>Your account has been successfully created. You can now start exploring internship opportunities.</p>
-//         <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-//           <h3>What's next?</h3>
-//           <ul>
-//             <li>Complete your profile</li>
-//             <li>Browse available internships</li>
-//             <li>Apply for positions that match your skills</li>
-//           </ul>
-//         </div>
-//         <p>Best of luck with your internship search!</p>
-//         <p>Team InternX</p>
-//       </div>
-//     `;
-
-//     await sendEmail(email, 'Welcome to InternX!', welcomeEmailHtml);
-
-//     res.status(201).json({
-//       message: 'User registered successfully',
-//       token,
-//       user: {
-//         id: user._id,
-//         name: user.name,
-//         email: user.email,
-//         phone: user.phone,
-//         currentCity: user.currentCity,
-//         pinCode:user.pinCode,
-//         futureGoals: user.futureGoals,
-     
-//         studyPreference: user.studyPreference,
-//         section: user.section,
-//         higherEducation: user.higherEducation,
-//         twelfthPU: user.twelfthPU,
-//         ugDegree: user.ugDegree,
-//         pgMasters: user.pgMasters,
-//         skills: user.skills,
-//         keywords: user.keywords,
-//         resume: user.resume ? true : false,
-//         profilePicture: user.profilePicture ? true : false,
-//         applicationCount: user.applicationCount,
-//       currentAcademicStatus:user.currentAcademicStatus      }
-//     });
-//   } catch (error) {
-//     console.error('Registration error:', error);
-//     res.status(500).json({ message: 'Registration failed' });
-//   }
-// }));
-
-
 // User Registration (Simplified)
 app.post('/api/register', withDB(async (req, res) => {
   try {
@@ -1871,137 +1732,6 @@ app.post('/api/admin/login', withDB(async (req, res) => {
   }
 }));
 
-
-
-// app.get('/api/jobs', withDB(async (req, res) => {
-//   try {
-//     const {
-//       page = 1,
-//       limit = 12,
-//       search,
-//       location,
-//       domain,
-//       position,
-//       minSalary,
-//       maxSalary
-//     } = req.query;
-
-//     const now = new Date();
-
-//     const parsedPage = parseInt(page) || 1;
-//     const parsedLimit = parseInt(limit) || 12;
-//     const skip = (parsedPage - 1) * parsedLimit;
-
-//     // Base filters (active + not expired)
-//     const andConditions = [
-//       { isActive: true },
-//       {
-//         $or: [
-//           { expiryDate: { $exists: false } },
-//           { expiryDate: null },
-//           { expiryDate: { $gt: now } }
-//         ]
-//       }
-//     ];
-
-//     // Search, location, domain, position filters same as before
-//     if (search) {
-//       const searchTerms = search.trim().split(/\s+/);
-//       if (searchTerms.length === 1) {
-//         const term = searchTerms[0];
-//         andConditions.push({
-//           $or: [
-//             { title: { $regex: `\\b${term}\\b`, $options: 'i' } },
-//             { domain: { $regex: `\\b${term}\\b`, $options: 'i' } },
-//             { title: { $regex: `\\b${term}`, $options: 'i' } },
-//             { domain: { $regex: `\\b${term}`, $options: 'i' } }
-//           ]
-//         });
-//       } else {
-//         searchTerms.forEach(term => {
-//           andConditions.push({
-//             $or: [
-//               { title: { $regex: `\\b${term}`, $options: 'i' } },
-//               { domain: { $regex: `\\b${term}`, $options: 'i' } }
-//             ]
-//           });
-//         });
-//       }
-//     }
-
-//     if (location) {
-//       andConditions.push({
-//         location: {
-//           $regex: location.trim(),
-//           $options: 'i'
-//         }
-//       });
-//     }
-
-//     if (domain) {
-//       andConditions.push({ domain: { $regex: domain, $options: 'i' } });
-//     }
-
-//     if (position) {
-//       andConditions.push({ position: { $regex: position, $options: 'i' } });
-//     }
-
-//     // Start build aggregation pipeline
-//     const pipeline = [
-//       { $match: { $and: andConditions } },
-//       // Convert salary string to number, if fails, set to null (will exclude later)
-//       { $addFields: { salaryNum: { $convert: { input: "$salary", to: "double", onError: null, onNull: null } } } }
-//     ];
-
-//     // Conditional filter only on numeric salary if min/max given
-//     if (
-//       (minSalary !== undefined && minSalary !== null && minSalary !== "" && !isNaN(Number(minSalary))) ||
-//       (maxSalary !== undefined && maxSalary !== null && maxSalary !== "" && !isNaN(Number(maxSalary)))
-//     ) {
-//       let salaryFilter = {};
-//       if (minSalary !== undefined && minSalary !== null && minSalary !== "" && !isNaN(Number(minSalary))) {
-//         salaryFilter.$gte = Number(minSalary);
-//       }
-//       if (maxSalary !== undefined && maxSalary !== null && maxSalary !== "" && !isNaN(Number(maxSalary))) {
-//         salaryFilter.$lte = Number(maxSalary);
-//       }
-
-//       // Filter only entries where salaryNum is numeric & falls into filter range
-//       pipeline.push({
-//         $match: {
-//           salaryNum: salaryFilter
-//         }
-//       });
-//     }
-
-//     // Sort, skip and limit for pagination
-//     pipeline.push({ $sort: { featured: -1, createdAt: -1 } });
-//     pipeline.push({ $skip: skip });
-//     pipeline.push({ $limit: parsedLimit });
-
-//     // Count total without pagination but with base andConditions only (excluding salary range)
-//     const total = await Job.countDocuments({ $and: andConditions });
-
-//     // Run aggregation query
-//     const jobs = await Job.aggregate(pipeline);
-
-//     res.json({
-//       jobs,
-//       pagination: {
-//         current: parsedPage,
-//         pages: Math.ceil(total / parsedLimit),
-//         total
-//       }
-//     });
-
-//   } catch (error) {
-//     console.error('Error fetching jobs:', error);
-//     res.status(500).json({ message: 'Failed to fetch jobs' });
-//   }
-// }));
-
-
-
 // add this helper somewhere near the top of your file
 function escapeRegExp(str = '') {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -2226,162 +1956,6 @@ app.get('/api/my-applications', authenticateToken, withDB(async (req, res) => {
   }
 }));
 
-
-
-
-
-// ✅ Helper to send email to the company
-
-// const sendCompanyEmail = async (to, subject, html, attachments = []) => {
-//   return applicationTransporter.sendMail({
-//     from: `"InternX" <${process.env.EMAIL_APP}>`,
-//     to,
-//     subject,
-//     html,
-//     attachments
-//   });
-// };
-// const sendUserEmail = async (to, subject, html) => {
-//   return applicationTransporter.sendMail({
-//     from: `"InternX" <${process.env.EMAIL_APP}>`,
-//     to,
-//     subject,
-//     html
-//   });
-// };
-// app.post('/api/jobs/:id/apply', authenticateToken, withDB(async (req, res) => {
-//   try {
-//     const { coverLetter } = req.body;
-//     const jobId = req.params.id;
-//     const userId = req.user.userId;
-
-//     const user = await User.findById(userId);
-//     if (!user) return res.status(404).json({ message: 'User not found' });
-
-//     if (!user.resume) {
-//       return res.status(400).json({
-//         message: 'Please upload your resume before applying for internships',
-//         requiresResume: true
-//       });
-//     }
-
-//     const job = await Job.findById(jobId);
-//     if (!job) return res.status(404).json({ message: 'Internship not found' });
-
-//     const existingApplication = await Application.findOne({
-//       jobId: new mongoose.Types.ObjectId(jobId),
-//       userId: new mongoose.Types.ObjectId(userId)
-//     });
-
-//     if (existingApplication) {
-//       return res.status(400).json({ message: 'You have already applied for this internship' });
-//     }
-
-//     const settings = await SystemSettings.findOne();
-//     const maxApplications = settings?.maxApplicationsPerUser || 3;
-
-//     if (user.applicationCount >= maxApplications) {
-//       return res.status(400).json({
-//         message: `You have reached the maximum limit of ${maxApplications} applications. Please wait for responses before applying to more internships.`,
-//         applicationLimitReached: true,
-//         maxApplications
-//       });
-//     }
-
-//     await Application.create({
-//       jobId,
-//       userId,
-//       coverLetter,
-//       status: 'Pending',
-//       appliedAt: new Date()
-//     });
-
-//     await User.findByIdAndUpdate(userId, { $inc: { applicationCount: 1 } });
-//     await Job.findByIdAndUpdate(jobId, { $inc: { applicationCount: 1 } });
-
-//     // 📤 Send email to company
-//     // 📤 Send email to company
-//     if (job.email) {
-//       const companyMailHtml = `
-//     <div style="font-family: Arial,sans-serif;max-width:600px;margin:0 auto;">
-//       <h2 style="color:#16a34a;">New Application: ${job.title}</h2>
-//       <p>A new candidate has applied for your internship.</p>
-//       <div style="background-color:#f3f4f6;padding:20px;margin:20px 0;">
-//         <p><strong>Name:</strong> ${user.name}</p>
-//         <p><strong>Email:</strong> ${user.email}</p>
-//         <p><strong>Phone:</strong> ${user.phone}</p>
-//         <p><strong>Cover Letter:</strong><br>${coverLetter || ""}</p>
-//       </div>
-//       <p>Candidate's resume is attached to this email.</p>
-//       <p>Best regards,<br/>Team InternX</p>
-//     </div>
-//   `;
-
-//       let resumeAttachment = null;
-//       if (user.resume && !user.resume.startsWith('http')) {
-//         resumeAttachment = {
-//           filename: user.resumeFilename || 'resume.pdf',
-//           content: Buffer.from(user.resume, 'base64'),  // ✅ safer format
-//           encoding: 'base64'
-//         };
-//       }
-
-//       try {
-//         await sendCompanyEmail(
-//           job.email,
-//           `New Application for "${job.title}" via InternX`,
-//           companyMailHtml,
-//           resumeAttachment ? [resumeAttachment] : []
-//         );
-//       } catch (emailErr) {
-//         console.error('❌ Failed to send email to company:', emailErr.message);
-//       }
-//     }
-
-
-
-//     // 📩 Send confirmation to user
-//     const applicationEmailHtml = `
-//   <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-//     <h2 style="color: #16a34a;">Application Submitted Successfully!</h2>
-//     <p>Dear ${user.name},</p>
-//     <p>Your application for the following internship has been submitted successfully:</p>
-//     <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-//       <h3 style="color: #16a34a;">${job.title}</h3>
-//       <p><strong>Company:</strong> ${job.company}</p>
-//       <p><strong>Location:</strong> ${job.location}</p>
-//       <p><strong>Applied on:</strong> ${new Date().toLocaleDateString()}</p>
-//       <p><strong>Status:</strong> Pending Review</p>
-//     </div>
-//     <p>We will notify you once your application is reviewed.</p>
-//     <p>Applications remaining: ${maxApplications - user.applicationCount - 1}</p>
-//     <p>Best of luck!</p>
-//     <p>Team InternX</p>
-//   </div>
-// `;
-
-//     try {
-//       await sendUserEmail(
-//         user.email,
-//         `Your application for ${job.title} has been received`,
-//         applicationEmailHtml
-//       );
-//     } catch (emailErr) {
-//       console.error('❌ Failed to send confirmation email to user:', emailErr.message);
-//     }
-//     res.status(201).json({
-//       message: 'Application submitted successfully',
-//       emailToCompany: job.email ? 'sent' : 'not sent (no job email)',
-//       emailToUser: user.email ? 'sent' : 'not sent (no user email)',
-//       applicationsRemaining: maxApplications - user.applicationCount - 1
-//     });
-
-//   } catch (error) {
-//     console.error('❌ Error applying for internship:', error.message);
-//     res.status(500).json({ message: 'Failed to apply for internship' });
-//   }
-// }));
-
 // Enhanced email sending functions with delivery status
 
 const sendCompanyEmail = async (to, subject, html, attachments = []) => {
@@ -2416,190 +1990,6 @@ const isValidEmail = (email) => {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return emailRegex.test(email);
 };
-
-// app.post('/api/jobs/:id/apply', authenticateToken, withDB(async (req, res) => {
-//   try {
-//     const { coverLetter } = req.body;
-//     const jobId = req.params.id;
-//     const userId = req.user.userId;
-
-//     const user = await User.findById(userId);
-//     if (!user) return res.status(404).json({ message: 'User not found' });
-
-//     if (!user.resume) {
-//       return res.status(400).json({
-//         message: 'Please upload your resume before applying for internships',
-//         requiresResume: true
-//       });
-//     }
-
-//     const job = await Job.findById(jobId);
-//     if (!job) return res.status(404).json({ message: 'Internship not found' });
-
-//     const existingApplication = await Application.findOne({
-//       jobId: new mongoose.Types.ObjectId(jobId),
-//       userId: new mongoose.Types.ObjectId(userId)
-//     });
-
-//     if (existingApplication) {
-//       return res.status(400).json({ message: 'You have already applied for this internship' });
-//     }
-
-//     const settings = await SystemSettings.findOne();
-//     const maxApplications = settings?.maxApplicationsPerUser || 3;
-
-//     if (user.applicationCount >= maxApplications) {
-//       return res.status(400).json({
-//         message: `You have reached the maximum limit of ${maxApplications} applications. Please wait for responses before applying to more internships.`,
-//         applicationLimitReached: true,
-//         maxApplications
-//       });
-//     }
-
-//     // Determine the email delivery status based on company email
-//     let applicationStatus = 'application received';
-//     let companyEmailStatus = { status: 'application received', message: 'No company email provided' };
-//     let userEmailStatus = { status: 'not_available', message: 'No user email provided' };
-
-//     // 📤 Send email to company
-//     if (job.email && job.email.trim()) {
-//       // Validate company email
-//       if (!isValidEmail(job.email)) {
-//         applicationStatus = 'undelivered';
-//         companyEmailStatus = {
-//           status: 'undelivered',
-//           message: 'Invalid company email format',
-//           email: job.email
-//         };
-//       } else {
-//         const companyMailHtml = `
-//           <div style="font-family: Arial,sans-serif;max-width:600px;margin:0 auto;">
-//             <h2 style="color:#16a34a;">New Application: ${job.title}</h2>
-//             <p>A new candidate has applied for your internship.</p>
-//             <div style="background-color:#f3f4f6;padding:20px;margin:20px 0;">
-//               <p><strong>Name:</strong> ${user.name}</p>
-//               <p><strong>Email:</strong> ${user.email}</p>
-//               <p><strong>Phone:</strong> ${user.phone}</p>
-//               <p><strong>Cover Letter:</strong><br>${coverLetter || ""}</p>
-//             </div>
-//             <p>Candidate's resume is attached to this email.</p>
-//             <p>Best regards,<br/>Team InternX</p>
-//           </div>
-//         `;
-
-//         let resumeAttachment = null;
-//         if (user.resume && !user.resume.startsWith('http')) {
-//           resumeAttachment = {
-//             filename: user.resumeFilename || 'resume.pdf',
-//             content: Buffer.from(user.resume, 'base64'),
-//             encoding: 'base64'
-//           };
-//         }
-
-//         const emailResult = await sendCompanyEmail(
-//           job.email,
-//           `New Application for "${job.title}" via InternX`,
-//           companyMailHtml,
-//           resumeAttachment ? [resumeAttachment] : []
-//         );
-
-//         // Set application status based on company email result
-//         applicationStatus = emailResult.status;
-
-//         companyEmailStatus = {
-//           status: emailResult.status,
-//           message: emailResult.status === 'sent' ? 'Email sent successfully' : `Failed to send: ${emailResult.error}`,
-//           email: job.email,
-//           messageId: emailResult.messageId
-//         };
-//       }
-//     } else {
-//       // No company email provided or empty email
-//       applicationStatus = 'application received';
-//     }
-
-//     // Safety check to prevent 'Pending' status
-//     if (applicationStatus === 'Pending') {
-//       applicationStatus = 'application received';
-//     }
-
-//     // Create application with the determined status
-//     const savedApplication = await Application.create({
-//       jobId,
-//       userId,
-//       coverLetter,
-//       status: applicationStatus,
-//       appliedAt: new Date()
-//     });
-
-//     await User.findByIdAndUpdate(userId, { $inc: { applicationCount: 1 } });
-//     await Job.findByIdAndUpdate(jobId, { $inc: { applicationCount: 1 } });
-
-//     // 📩 Send confirmation to user (separate from application status)
-//     if (user.email) {
-//       // Validate user email
-//       if (!isValidEmail(user.email)) {
-//         userEmailStatus = {
-//           status: 'undelivered',
-//           message: 'Invalid user email format',
-//           email: user.email
-//         };
-//       } else {
-//         const applicationEmailHtml = `
-//           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-//             <h2 style="color: #16a34a;">Application Submitted Successfully!</h2>
-//             <p>Dear ${user.name},</p>
-//             <p>Your application for the following internship has been submitted successfully:</p>
-//             <div style="background-color: #f3f4f6; padding: 20px; margin: 20px 0;">
-//               <h3 style="color: #16a34a;">${job.title}</h3>
-//               <p><strong>Company:</strong> ${job.company}</p>
-//               <p><strong>Location:</strong> ${job.location}</p>
-//               <p><strong>Applied on:</strong> ${new Date().toLocaleDateString()}</p>
-       
-//             </div>
-//             <p>We will notify you once your application is reviewed.</p>
-//             <p>Applications remaining: ${maxApplications - user.applicationCount - 1}</p>
-//             <p>Best of luck!</p>
-//             <p>Team InternX</p>
-//           </div>
-//         `;
-
-//         const emailResult = await sendUserEmail(
-//           user.email,
-//           `Your application for ${job.title} has been received`,
-//           applicationEmailHtml
-//         );
-
-//         userEmailStatus = {
-//           status: emailResult.status,
-//           message: emailResult.status === 'sent' ? 'Confirmation email sent successfully' : `Failed to send: ${emailResult.error}`,
-//           email: user.email,
-//           messageId: emailResult.messageId
-//         };
-//       }
-//     }
-
-//     res.status(201).json({
-//       message: 'Application submitted successfully',
-//       applicationStatus: applicationStatus,
-//       emailStatus: {
-//         companyEmail: companyEmailStatus,
-//         userEmail: userEmailStatus
-//       },
-//       applicationsRemaining: maxApplications - user.applicationCount - 1
-//     });
-
-//   } catch (error) {
-//     console.error('❌ Error applying for internship:', error.message);
-//     res.status(500).json({ message: 'Failed to apply for internship' });
-//   }
-// }));
-
-
-
-
-
-// Get resume
 
 app.post('/api/jobs/:id/apply', authenticateToken, withDB(async (req, res) => {
   try {
@@ -2863,10 +2253,6 @@ app.get('/api/profile-picture/:userId', withDB(async (req, res) => {
 }));
 
 
-
-
-
-
 // Get skill suggestions
 app.get('/api/skill-suggestions', (req, res) => {
   const skills = [
@@ -3087,73 +2473,6 @@ app.post('/api/admin/jobs/bulk-delete', authenticateAdmin, withDB(async (req, re
     res.status(500).json({ message: 'Failed to delete internships' });
   }
 }));
-
-// Bulk upload jobs
-// app.post('/api/admin/jobs/bulk-upload', authenticateAdmin, upload.single('excel'), withDB(async (req, res) => {
-//   try {
-//     if (!req.file) {
-//       return res.status(400).json({ message: 'Excel file is required' });
-//     }
-
-// const workbook = XLSX.read(req.file.path);
-
-//     const sheetName = workbook.SheetNames[0];
-//     const worksheet = workbook.Sheets[sheetName];
-//    const data = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
-
-//     let jobsCreated = 0;
-//     const errors = [];
-
-//     for (const row of data) {
-//       try {
-//         const jobData = {
-//           title: row.title || row.Title,
-//           company: row.company || row.Company,
-//           location: row.location || row.Location,
-//           domain: row.domain || row.Domain,
-//           position: row.position || row.Position,
-//           salary: String(row.salary || row.Salary || ''),
-//           type: row.type || row.Type || 'Full-time',
-//           duration: row.duration || row.Duration,
-//           description: row.description || row.Description,
-//           requirements: (row.requirements || row.Requirements || '').split('\n').filter(req => req.trim()),
-//           email: (row.email || row.Email || '').trim() || 'NA',
-//           isActive: true,
-//           createdBy: req.admin.adminId
-//         };
-
-//         // Validate required fields
-//         if (!jobData.title || !jobData.company || !jobData.location || !jobData.salary) {
-//           errors.push(`Row ${data.indexOf(row) + 1}: Missing required fields`);
-//           continue;
-//         }
-
-//         await Job.create(jobData);
-//         jobsCreated++;
-//       } catch (error) {
-//         errors.push(`Row ${data.indexOf(row) + 1}: ${error.message}`);
-//       }
-//     }
-
-//     // Save Excel file record
-//     await ExcelFile.create({
-//       filename: req.file.filename,
-//       originalName: req.file.originalname,
-//       path: req.file.path,
-//       jobsCreated,
-//       uploadedBy: req.admin.adminId
-//     });
-
-//     res.json({
-//       message: `Successfully created ${jobsCreated} internships`,
-//       jobsCreated,
-//       errors: errors.length > 0 ? errors : undefined
-//     });
-//   } catch (error) {
-//     console.error('Error in bulk upload:', error);
-//     res.status(500).json({ message: 'Failed to upload internships' });
-//   }
-// }));
 
 // Bulk upload jobs
 app.post('/api/admin/jobs/bulk-upload', authenticateAdmin, upload.single('excel'), withDB(async (req, res) => {
