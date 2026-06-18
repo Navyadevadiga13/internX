@@ -617,62 +617,62 @@ app.post('/api/send-otp', withDB(async (req, res) => {
     const { email } = req.body;
 
     if (!email) {
-      return res.status(400).json({ message: 'Email is required' });
+      return res.status(200).json({
+        message: 'If the request is valid, an OTP has been sent to the email address.'
+      });
     }
 
+    const safeEmail = email.trim().toLowerCase();
+
     // Check if user already exists
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email: safeEmail });
+
+    // If user already exists, return generic response
     if (existingUser) {
-      return res.status(400).json({
-        message: 'User with this email already exists'
+      return res.status(200).json({
+        message: 'If the request is valid, an OTP has been sent to the email address.'
       });
     }
 
     const otp = generateOTP();
 
-    // Save OTP to database
+    // Save OTP
     await OTP.findOneAndUpdate(
-      { email },
-      { email, otp },
+      { email: safeEmail },
+      {
+        email: safeEmail,
+        otp,
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000)
+      },
       { upsert: true, new: true }
     );
-
-    const settings = await SystemSettings.findOne();
-
-    console.log("System Settings:", settings);
 
     const emailHtml = `
       <div>
         <h2>Welcome to InternX!</h2>
-        <p>Your OTP is ${otp}</p>
+        <p>Your OTP is <strong>${otp}</strong></p>
+        <p>This OTP will expire in 5 minutes.</p>
       </div>
     `;
 
-    console.log("Attempting to send email...");
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: safeEmail,
+      subject: 'InternX - Email Verification OTP',
+      html: emailHtml
+    });
 
-    try {
-      const result = await transporter.sendMail({
-        from: process.env.EMAIL_USER,
-        to: email,
-        subject: 'InternX - Email Verification OTP',
-        html: emailHtml
-      });
-
-      console.log("MAIL SENT SUCCESSFULLY");
-      console.log("Message ID:", result.messageId);
-
-    } catch (mailError) {
-      console.error("MAIL ERROR:");
-      console.error(mailError);
-    }
-
-    console.log("========== SEND OTP END ==========");
-
-    res.json({ message: 'OTP sent successfully' });
+    return res.status(200).json({
+      message: 'If the request is valid, an OTP has been sent to the email address.'
+    });
 
   } catch (error) {
     console.error('SEND OTP ERROR:', error);
-    res.status(500).json({ message: 'Failed to send OTP' });
+
+    // Always return same response
+    return res.status(200).json({
+      message: 'If the request is valid, an OTP has been sent to the email address.'
+    });
   }
 }));
 
