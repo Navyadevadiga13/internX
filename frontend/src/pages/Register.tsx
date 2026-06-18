@@ -80,7 +80,15 @@ studyPreference: 'India'
       toast.error('Please fill all required fields');
       return;
     }
+const strongPasswordRegex =
+  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&^#()_+\-=\[\]{};':"\\|,.<>\/?])[A-Za-z\d@$!%*?&^#()_+\-=\[\]{};':"\\|,.<>\/?]{8,}$/;
 
+if (!strongPasswordRegex.test(formData.password)) {
+  toast.error(
+    'Password must contain 8+ characters, uppercase, lowercase, number and special character'
+  );
+  return;
+}
     if (formData.password !== formData.confirmPassword) {
       toast.error('Passwords do not match');
       return;
@@ -207,22 +215,27 @@ studyPreference: 'India'
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Password *
               </label>
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  name="password"
-                  value={formData.password}
-                  onChange={handleInputChange}
-                  className="w-full p-3 border rounded pr-10 focus:ring-2 focus:ring-green-500"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-3 text-gray-500"
-                >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
+             <div className="relative">
+  <input
+    type={showPassword ? 'text' : 'password'}
+    name="password"
+    value={formData.password}
+    onChange={handleInputChange}
+    className="w-full p-3 border rounded pr-10 focus:ring-2 focus:ring-green-500"
+  />
+  <button
+    type="button"
+    onClick={() => setShowPassword(!showPassword)}
+    className="absolute right-3 top-3 text-gray-500"
+  >
+    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+  </button>
+</div>
+
+<p className="text-xs text-gray-500 mt-1">
+  Password must contain at least 8 characters, one uppercase letter,
+  one lowercase letter, one number and one special character.
+</p>
             </div>
 
             {/* Confirm Password */}

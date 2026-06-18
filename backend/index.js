@@ -1,6 +1,7 @@
 import dns from "dns";
 
 dns.setServers(["8.8.8.8", "1.1.1.1"]);
+dns.setDefaultResultOrder("ipv4first");
 import express from 'express';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
@@ -82,22 +83,26 @@ const connectDB = async () => {
 
 // Email configuration
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false,
+  family: 4,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
   },
   tls: {
     rejectUnauthorized: false
-  },
-  logger: false,  // Disable logs
-  debug: false    // Disable debug output
+  }
 });
 
 const applicationTransporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false,
+  family: 4,
   auth: {
-    user: process.env.EMAIL_APP, // internx@gmail.com
+    user: process.env.EMAIL_APP,
     pass: process.env.EMAIL_APP_PASSWORD
   },
   tls: {
@@ -279,17 +284,29 @@ const ExcelFile = mongoose.model('ExcelFile', excelFileSchema);
 
 // OTP Schema
 const otpSchema = new mongoose.Schema({
-  email: { type: String, required: true },
-  otp: { type: String, required: true },
+  email: {
+    type: String,
+    required: true,
+    unique: true
+  },
+
+  otp: {
+    type: String,
+    required: true
+  },
+
   expiresAt: {
     type: Date,
-    default: () => new Date(Date.now() + 25 * 60 * 1000), // 25 minutes in the future
-    expires: 0  // TTL index deletes at this timestamp
+    required: true,
+    expires: 0 // MongoDB TTL
+  },
+
+  createdAt: {
+    type: Date,
+    default: Date.now
   }
 });
-
-
-const OTP = mongoose.model('OTP', otpSchema)
+const OTP = mongoose.model('OTP', otpSchema);
 // Password Reset OTP Schema
 const passwordResetOtpSchema = new mongoose.Schema({
   email: { type: String, required: true },
@@ -415,7 +432,9 @@ const authenticateToken = (req, res, next) => {
  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
 
     if (err) {
-      return res.status(403).json({ message: 'Your session has expired. Please sign in again to continu' });
+     return res.status(403).json({
+  message: 'Your session has expired. Please sign in again to continue.'
+});
     }
     req.user = user;
     next();
@@ -596,57 +615,63 @@ app.get('/api/system-settings', withDB(async (req, res) => {
 app.post('/api/send-otp', withDB(async (req, res) => {
   try {
     const { email } = req.body;
-    if (typeof email !== 'string') {
-  return res.status(400).json({
-    message: 'Invalid email'
-  });
-}
-const safeEmail = email.trim().toLowerCase();
 
     if (!email) {
       return res.status(400).json({ message: 'Email is required' });
     }
 
     // Check if user already exists
- const existingUser = await User.findOne({
-  email: safeEmail
-});
+    const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(400).json({ message: 'User with this email already exists' });
+      return res.status(400).json({
+        message: 'User with this email already exists'
+      });
     }
 
     const otp = generateOTP();
-if (typeof email !== 'string') {
-  return res.status(400).json({
-    message: 'Invalid email'
-  });
-}
-const safeEmail = email.toLowerCase().trim();
-    // Save OTP to database
-await OTP.findOneAndUpdate(
-  { email: safeEmail },
-  { email: safeEmail, otp },
-  { upsert: true, new: true }
-);
 
-    // Send OTP email
+    // Save OTP to database
+    await OTP.findOneAndUpdate(
+      { email },
+      { email, otp },
+      { upsert: true, new: true }
+    );
+
+    const settings = await SystemSettings.findOne();
+
+    console.log("System Settings:", settings);
+
     const emailHtml = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #16a34a;">Welcome to InternX!</h2>
-        <p>Your OTP for email verification is:</p>
-        <div style="background-color: #f3f4f6; padding: 20px; text-align: center; margin: 20px 0;">
-          <h1 style="color: #16a34a; font-size: 32px; margin: 0;">${otp}</h1>
-        </div>
-        <p>This OTP will expire in 25 minutes.</p>
-        <p>If you didn't request this, please ignore this email.</p>
+      <div>
+        <h2>Welcome to InternX!</h2>
+        <p>Your OTP is ${otp}</p>
       </div>
     `;
 
-    await sendEmail(email, 'InternX - Email Verification OTP', emailHtml);
+    console.log("Attempting to send email...");
+
+    try {
+      const result = await transporter.sendMail({
+        from: process.env.EMAIL_USER,
+        to: email,
+        subject: 'InternX - Email Verification OTP',
+        html: emailHtml
+      });
+
+      console.log("MAIL SENT SUCCESSFULLY");
+      console.log("Message ID:", result.messageId);
+
+    } catch (mailError) {
+      console.error("MAIL ERROR:");
+      console.error(mailError);
+    }
+
+    console.log("========== SEND OTP END ==========");
 
     res.json({ message: 'OTP sent successfully' });
+
   } catch (error) {
-    console.error('Error sending OTP:', error);
+    console.error('SEND OTP ERROR:', error);
     res.status(500).json({ message: 'Failed to send OTP' });
   }
 }));
@@ -694,7 +719,7 @@ await PasswordResetOTP.findOneAndUpdate(
         <div style="background-color: #f3f4f6; padding: 20px; text-align: center; margin: 20px 0;">
           <h1 style="color: #16a34a; font-size: 32px; margin: 0;">${otp}</h1>
         </div>
-        <p>This OTP will expire in 25 minutes.</p>
+        <p>This OTP will expire in 5 minutes.</p>
         <p>If you didn't request this, please ignore this email.</p>
         <p>Team InternX</p>
       </div>
@@ -908,7 +933,7 @@ const safeEmail = email.trim().toLowerCase();
     // Save or update OTP with expiry (e.g., 25 min)
     await OTP.findOneAndUpdate(
       { email },
-      { email, otp, expiresAt: new Date(Date.now() + 25 * 60 * 1000) },
+      { email, otp, expiresAt: new Date(Date.now() + 5 * 60 * 1000) },
       { upsert: true, new: true }
     );
 
@@ -920,7 +945,7 @@ const safeEmail = email.trim().toLowerCase();
         <div style="background-color: #f3f4f6; padding: 20px; text-align: center; margin: 20px 0;">
           <h1 style="color: #16a34a; font-size: 32px; margin: 0;">${otp}</h1>
         </div>
-        <p>This OTP will expire in 25 minutes.</p>
+        <p>This OTP will expire in 5 minutes.</p>
         <p>If you didn't request this, please ignore this email.</p>
       </div>
     `;
@@ -1076,6 +1101,16 @@ app.post('/api/register_company', uploadCompanyLogo.single('logo'), async (req, 
     if (password !== confirmPassword) {
       return res.status(400).json({ message: 'Passwords do not match' });
     }
+// Password strength validation
+const strongPasswordRegex =
+  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&^#()_+\-=\[\]{};':"\\|,.<>\/?])[A-Za-z\d@$!%*?&^#()_+\-=\[\]{};':"\\|,.<>\/?]{8,}$/;
+
+if (!strongPasswordRegex.test(password)) {
+  return res.status(400).json({
+    message:
+      'Password must contain at least 8 characters, one uppercase letter, one lowercase letter, one number, and one special character.'
+  });
+}
 
     // Check if email already exists
     const existingCompany = await Company.findOne({ email: email.toLowerCase() });
@@ -1554,7 +1589,16 @@ const otpRecord = await OTP.findOne({ email, otp });
 if (!otpRecord) {
   return res.status(400).json({ message: 'Invalid or expired OTP' });
 }
+// Check password strength
+const strongPasswordRegex =
+  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&^#()_+\-=\[\]{};':"\\|,.<>\/?])[A-Za-z\d@$!%*?&^#()_+\-=\[\]{};':"\\|,.<>\/?]{8,}$/;
 
+if (!strongPasswordRegex.test(password)) {
+  return res.status(400).json({
+    message:
+      'Password must contain at least 8 characters, one uppercase letter, one lowercase letter, one number, and one special character.'
+  });
+}
     // 3. Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
