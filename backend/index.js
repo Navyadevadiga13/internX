@@ -638,7 +638,7 @@ await OTP.findOneAndUpdate(
         <div style="background-color: #f3f4f6; padding: 20px; text-align: center; margin: 20px 0;">
           <h1 style="color: #16a34a; font-size: 32px; margin: 0;">${otp}</h1>
         </div>
-        <p>This OTP will expire in 25 minutes.</p>
+        <p>This OTP will expire in 5 minutes.</p>
         <p>If you didn't request this, please ignore this email.</p>
       </div>
     `;
@@ -696,7 +696,7 @@ await PasswordResetOTP.findOneAndUpdate(
         <div style="background-color: #f3f4f6; padding: 20px; text-align: center; margin: 20px 0;">
           <h1 style="color: #16a34a; font-size: 32px; margin: 0;">${otp}</h1>
         </div>
-        <p>This OTP will expire in 25 minutes.</p>
+        <p>This OTP will expire in 5 minutes.</p>
         <p>If you didn't request this, please ignore this email.</p>
         <p>Team InternX</p>
       </div>
@@ -711,45 +711,72 @@ await PasswordResetOTP.findOneAndUpdate(
   }
 }));
 
+////verify password reset OTP
 app.post('/api/verify-otp', withDB(async (req, res) => {
   try {
+
     const { email, otp } = req.body;
+
     if (
-  typeof email !== 'string' ||
-  typeof otp !== 'string'
-) {
-  return res.status(400).json({
-    message: 'Invalid input'
-  });
-}
-const safeOtp = otp.trim();
+      typeof email !== 'string' ||
+      typeof otp !== 'string'
+    ) {
+      return res.status(400).json({
+        message: 'Invalid input'
+      });
+    }
 
-const otpRecord = await PasswordResetOTP.findOne({
-  email: safeEmail
-});
+    // ADD THIS
+    const safeEmail =
+      email.toLowerCase().trim();
 
-  
+    const safeOtp =
+      otp.trim();
+
+    const otpRecord =
+      await PasswordResetOTP.findOne({
+        email: safeEmail
+      });
 
     if (!otpRecord) {
-      return res.status(400).json({ message: "No OTP found" });
+      return res.status(400).json({
+        message: "No OTP found"
+      });
     }
 
     if (new Date() > otpRecord.expiresAt) {
-      return res.status(400).json({ message: "Expired OTP" });
+      return res.status(400).json({
+        message: "Expired OTP"
+      });
     }
 
-
-    if (String(otpRecord.otp).trim() !== String(otp).trim()) {
-      return res.status(400).json({ message: "Invalid OTP" });
+    if (
+      String(otpRecord.otp).trim()
+      !==
+      safeOtp
+    ) {
+      return res.status(400).json({
+        message: "Invalid OTP"
+      });
     }
 
-    return res.status(200).json({ message: "OTP verified successfully" });
+    return res.status(200).json({
+      message: "OTP verified successfully"
+    });
 
   } catch (err) {
-    return res.status(500).json({ message: "Server error" });
+
+    console.error(
+      "VERIFY OTP ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      message: err.message
+    });
+
   }
 }));
-
 // Verify Password Reset OTP and Reset Password
 app.post('/api/reset-password', withDB(async (req, res) => {
   try {
