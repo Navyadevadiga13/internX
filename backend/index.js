@@ -1,8 +1,10 @@
+
 import dns from "dns";
 
 dns.setServers(["8.8.8.8", "1.1.1.1"]);
 dns.setDefaultResultOrder("ipv4first");
 import express from 'express';
+import helmet from 'helmet';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -39,6 +41,7 @@ const corsOptions = {
   credentials: true,
   optionsSuccessStatus: 200
 };
+app.use(helmet());
 app.use(express.json());
 app.use(mongoSanitize());
 app.use(cors(corsOptions));
@@ -450,7 +453,7 @@ const authenticateAdmin = (req, res, next) => {
     return res.status(401).json({ message: 'Access token required' });
   }
 
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+  jwt.verify(token, process.env.JWT_ADMIN, (err, user) => {
 
     if (err) {
       return res.status(403).json({ message: 'Invalid or expired token' });
@@ -472,7 +475,7 @@ const authenticateCompany = async (req, res, next) => {
       return res.status(401).json({ message: 'No token provided' });
     }
     const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET );
+    const decoded = jwt.verify(token, process.env.JWT_COMPANY );
 
     if (decoded.type !== 'company') {
       return res.status(403).json({ message: 'Access denied. Company authentication required.' });
@@ -1183,28 +1186,58 @@ app.post('/api/login_company', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ message: 'Email and password are required' });
+    // Prevent NoSQL Injection
+    if (
+      typeof email !== 'string' ||
+      typeof password !== 'string'
+    ) {
+      return res.status(400).json({
+        message: 'Invalid email or password'
+      });
     }
 
-    const company = await Company.findOne({ email });
+    const safeEmail = email.trim().toLowerCase();
+
+    if (!safeEmail || !password.trim()) {
+      return res.status(400).json({
+        message: 'Email and password are required'
+      });
+    }
+
+    const company = await Company.findOne({
+      email: safeEmail
+    });
+
     if (!company) {
-      return res.status(401).json({ message: 'Invalid email or password' });
+      return res.status(401).json({
+        message: 'Invalid email or password'
+      });
     }
 
-    // Block login if account is deactivated (temporarily or permanently flagged)
     if (company.isDeactivated) {
-      return res.status(403).json({ message: 'Account deactivated. Please contact support.' });
+      return res.status(403).json({
+        message: 'Account deactivated. Please contact support.'
+      });
     }
 
-    const isPasswordValid = await bcrypt.compare(password, company.password);
+    const isPasswordValid = await bcrypt.compare(
+      password,
+      company.password
+    );
+
     if (!isPasswordValid) {
-      return res.status(401).json({ message: 'Invalid email or password' });
+      return res.status(401).json({
+        message: 'Invalid email or password'
+      });
     }
 
     const token = jwt.sign(
-      { id: company._id, email: company.email, type: 'company' },
-      process.env.JWT_SECRET ,
+      {
+        id: company._id,
+        email: company.email,
+        type: 'company'
+      },
+      process.env.JWT_COMPANY,
       { expiresIn: '7d' }
     );
 
@@ -1223,9 +1256,12 @@ app.post('/api/login_company', async (req, res) => {
         founded: company.founded
       }
     });
+
   } catch (error) {
     console.error('Error logging in company:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    res.status(500).json({
+      message: 'Internal server error'
+    });
   }
 });
 
@@ -1650,14 +1686,9 @@ if (!strongPasswordRegex.test(password)) {
       message: 'User registered successfully',
       token,
       user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        currentCity: user.currentCity,
-        pinCode: user.pinCode,
-        studyPreference: user.studyPreference
-      }
+  id: user._id,
+  name: user.name
+}
     });
 
   } catch (error) {
@@ -1692,32 +1723,18 @@ app.post('/api/login', withDB(async (req, res) => {
       { expiresIn: '7d' }
     );
 
-    res.json({
-      message: 'Login successful',
-      token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        currentCity: user.currentCity,
-            pinCode:user.pinCode,
-        futureGoals: user.futureGoals,
-    
-        studyPreference: user.studyPreference,
-        section: user.section,
-        higherEducation: user.higherEducation,
-        twelfthPU: user.twelfthPU,
-        ugDegree: user.ugDegree,
-        pgMasters: user.pgMasters,
-        skills: user.skills,
-        keywords: user.keywords,
-        resume: user.resume ? true : false,
-        profilePicture: user.profilePicture ? true : false,
-        applicationCount: user.applicationCount,
-        currentAcademicStatus: user.currentAcademicStatus
-      }
-    });
+  res.json({
+  message: 'Login successful',
+  token,
+  user: {
+    id: user._id,
+    name: user.name,
+    studyPreference: user.studyPreference,
+    resume: !!user.resume,
+    profilePicture: !!user.profilePicture
+  }
+});
+
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ message: 'Login failed' });
@@ -1823,7 +1840,7 @@ const safeUsername = username.trim();
 
     const token = jwt.sign(
       { adminId: admin._id, username: admin.username, role: 'admin' },
-      process.env.JWT_SECRET ,
+      process.env.JWT_ADMIN,
       { expiresIn: '7d' }
     );
 
