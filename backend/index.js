@@ -1,10 +1,7 @@
-
 import dns from "dns";
 
 dns.setServers(["8.8.8.8", "1.1.1.1"]);
-dns.setDefaultResultOrder("ipv4first");
 import express from 'express';
-import helmet from 'helmet';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -18,7 +15,7 @@ import { dirname, join } from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
 import cron from 'node-cron';
-import mongoSanitize from 'express-mongo-sanitize';
+
 
 
 dotenv.config();
@@ -41,9 +38,7 @@ const corsOptions = {
   credentials: true,
   optionsSuccessStatus: 200
 };
-app.use(helmet());
-app.use(express.json());
-app.use(mongoSanitize());
+
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -86,26 +81,22 @@ const connectDB = async () => {
 
 // Email configuration
 const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false,
-  family: 4,
+  service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
   },
   tls: {
     rejectUnauthorized: false
-  }
+  },
+  logger: false,  // Disable logs
+  debug: false    // Disable debug output
 });
 
 const applicationTransporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false,
-  family: 4,
+  service: 'gmail',
   auth: {
-    user: process.env.EMAIL_APP,
+    user: process.env.EMAIL_APP, // internx@gmail.com
     pass: process.env.EMAIL_APP_PASSWORD
   },
   tls: {
@@ -287,29 +278,17 @@ const ExcelFile = mongoose.model('ExcelFile', excelFileSchema);
 
 // OTP Schema
 const otpSchema = new mongoose.Schema({
-  email: {
-    type: String,
-    required: true,
-    unique: true
-  },
-
-  otp: {
-    type: String,
-    required: true
-  },
-
+  email: { type: String, required: true },
+  otp: { type: String, required: true },
   expiresAt: {
     type: Date,
-    required: true,
-    expires: 0 // MongoDB TTL
-  },
-
-  createdAt: {
-    type: Date,
-    default: Date.now
+    default: () => new Date(Date.now() + 25 * 60 * 1000), // 25 minutes in the future
+    expires: 0  // TTL index deletes at this timestamp
   }
 });
-const OTP = mongoose.model('OTP', otpSchema);
+
+
+const OTP = mongoose.model('OTP', otpSchema)
 // Password Reset OTP Schema
 const passwordResetOtpSchema = new mongoose.Schema({
   email: { type: String, required: true },
@@ -435,9 +414,7 @@ const authenticateToken = (req, res, next) => {
  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
 
     if (err) {
-     return res.status(403).json({
-  message: 'Your session has expired. Please sign in again to continue.'
-});
+      return res.status(403).json({ message: 'Your session has expired. Please sign in again to continu' });
     }
     req.user = user;
     next();
@@ -453,7 +430,7 @@ const authenticateAdmin = (req, res, next) => {
     return res.status(401).json({ message: 'Access token required' });
   }
 
-  jwt.verify(token, process.env.JWT_ADMIN, (err, user) => {
+  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
 
     if (err) {
       return res.status(403).json({ message: 'Invalid or expired token' });
@@ -475,7 +452,7 @@ const authenticateCompany = async (req, res, next) => {
       return res.status(401).json({ message: 'No token provided' });
     }
     const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_COMPANY );
+    const decoded = jwt.verify(token, process.env.JWT_SECRET );
 
     if (decoded.type !== 'company') {
       return res.status(403).json({ message: 'Access denied. Company authentication required.' });
@@ -618,45 +595,27 @@ app.get('/api/system-settings', withDB(async (req, res) => {
 app.post('/api/send-otp', withDB(async (req, res) => {
   try {
     const { email } = req.body;
-    if (typeof email !== 'string') {
-  return res.status(400).json({
-    message: 'Invalid email'
-  });
-}
-const safeEmail = email.trim().toLowerCase();
 
     if (!email) {
-      return res.status(200).json({
-        message: 'If the request is valid, an OTP has been sent to the email address.'
-      });
+      return res.status(400).json({ message: 'Email is required' });
     }
 
-    const safeEmail = email.trim().toLowerCase();
-
     // Check if user already exists
-    const existingUser = await User.findOne({ email: safeEmail });
-
-    // If user already exists, return generic response
+    const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(200).json({
-        message: 'If the request is valid, an OTP has been sent to the email address.'
-      });
+      return res.status(400).json({ message: 'User with this email already exists' });
     }
 
     const otp = generateOTP();
-if (typeof email !== 'string') {
-  return res.status(400).json({
-    message: 'Invalid email'
-  });
-}
-const safeEmail = email.toLowerCase().trim();
-    // Save OTP to database
-await OTP.findOneAndUpdate(
-  { email: safeEmail },
-  { email: safeEmail, otp },
-  { upsert: true, new: true }
-);
 
+    // Save OTP to database
+    await OTP.findOneAndUpdate(
+      { email },
+      { email, otp },
+      { upsert: true, new: true }
+    );
+
+    // Send OTP email
     const emailHtml = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #16a34a;">Welcome to InternX!</h2>
@@ -669,24 +628,12 @@ await OTP.findOneAndUpdate(
       </div>
     `;
 
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: safeEmail,
-      subject: 'InternX - Email Verification OTP',
-      html: emailHtml
-    });
+    await sendEmail(email, 'InternX - Email Verification OTP', emailHtml);
 
-    return res.status(200).json({
-      message: 'If the request is valid, an OTP has been sent to the email address.'
-    });
-
+    res.json({ message: 'OTP sent successfully' });
   } catch (error) {
-    console.error('SEND OTP ERROR:', error);
-
-    // Always return same response
-    return res.status(200).json({
-      message: 'If the request is valid, an OTP has been sent to the email address.'
-    });
+    console.error('Error sending OTP:', error);
+    res.status(500).json({ message: 'Failed to send OTP' });
   }
 }));
 
@@ -694,20 +641,12 @@ await OTP.findOneAndUpdate(
 app.post('/api/forgot-password', withDB(async (req, res) => {
   try {
     const { email } = req.body;
-    const safeEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
-if (typeof email !== 'string') {
-  return res.status(400).json({
-    message: 'Invalid email'
-  });
-}
 
     if (!email) {
       return res.status(400).json({ message: 'Email is required' });
     }
 
-    const user = await User.findOne({
-  email: safeEmail
-});
+    const user = await User.findOne({ email });
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -734,7 +673,7 @@ await PasswordResetOTP.findOneAndUpdate(
         <div style="background-color: #f3f4f6; padding: 20px; text-align: center; margin: 20px 0;">
           <h1 style="color: #16a34a; font-size: 32px; margin: 0;">${otp}</h1>
         </div>
-        <p>This OTP will expire in 5 minutes.</p>
+        <p>This OTP will expire in 25 minutes.</p>
         <p>If you didn't request this, please ignore this email.</p>
         <p>Team InternX</p>
       </div>
@@ -749,85 +688,40 @@ await PasswordResetOTP.findOneAndUpdate(
   }
 }));
 
-////verify password reset OTP
 app.post('/api/verify-otp', withDB(async (req, res) => {
   try {
-
     const { email, otp } = req.body;
 
-    if (
-      typeof email !== 'string' ||
-      typeof otp !== 'string'
-    ) {
-      return res.status(400).json({
-        message: 'Invalid input'
-      });
-    }
+    const otpRecord = await PasswordResetOTP.findOne({
+  email: email.toLowerCase().trim()
+});
 
-    // ADD THIS
-    const safeEmail =
-      email.toLowerCase().trim();
-
-    const safeOtp =
-      otp.trim();
-
-    const otpRecord =
-      await PasswordResetOTP.findOne({
-        email: safeEmail
-      });
+  
 
     if (!otpRecord) {
-      return res.status(400).json({
-        message: "No OTP found"
-      });
+      return res.status(400).json({ message: "No OTP found" });
     }
 
     if (new Date() > otpRecord.expiresAt) {
-      return res.status(400).json({
-        message: "Expired OTP"
-      });
+      return res.status(400).json({ message: "Expired OTP" });
     }
 
-    if (
-      String(otpRecord.otp).trim()
-      !==
-      safeOtp
-    ) {
-      return res.status(400).json({
-        message: "Invalid OTP"
-      });
+
+    if (String(otpRecord.otp).trim() !== String(otp).trim()) {
+      return res.status(400).json({ message: "Invalid OTP" });
     }
 
-    return res.status(200).json({
-      message: "OTP verified successfully"
-    });
+    return res.status(200).json({ message: "OTP verified successfully" });
 
   } catch (err) {
-
-    console.error(
-      "VERIFY OTP ERROR:",
-      err
-    );
-
-    return res.status(500).json({
-      message: err.message
-    });
-
+    return res.status(500).json({ message: "Server error" });
   }
 }));
+
 // Verify Password Reset OTP and Reset Password
 app.post('/api/reset-password', withDB(async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
-    if (
-  typeof email !== 'string' ||
-  typeof otp !== 'string' ||
-  typeof newPassword !== 'string'
-) {
-  return res.status(400).json({
-    message: 'Invalid input'
-  });
-}
 
     if (!email || !otp || !newPassword) {
       return res.status(400).json({ message: 'Email, OTP, and new password are required' });
@@ -953,20 +847,13 @@ app.post("/api/company_reset_password", authenticateCompany, async (req, res) =>
 app.post('/api/company-send-otp', withDB(async (req, res) => {
   try {
     const { email } = req.body;
-    const safeEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
-if (typeof email !== 'string') {
-  return res.status(400).json({
-    message: 'Invalid email'
-  });
-}
+
     if (!email) {
       return res.status(400).json({ message: 'Email is required' });
     }
 
     // Check if company exists
-    const existingCompany = await Company.findOne({
-  email: safeEmail
-});
+    const existingCompany = await Company.findOne({ email });
     if (!existingCompany) {
       return res.status(404).json({ message: 'Company not found' });
     }
@@ -976,7 +863,7 @@ if (typeof email !== 'string') {
     // Save or update OTP with expiry (e.g., 25 min)
     await OTP.findOneAndUpdate(
       { email },
-      { email, otp, expiresAt: new Date(Date.now() + 5 * 60 * 1000) },
+      { email, otp, expiresAt: new Date(Date.now() + 25 * 60 * 1000) },
       { upsert: true, new: true }
     );
 
@@ -988,7 +875,7 @@ if (typeof email !== 'string') {
         <div style="background-color: #f3f4f6; padding: 20px; text-align: center; margin: 20px 0;">
           <h1 style="color: #16a34a; font-size: 32px; margin: 0;">${otp}</h1>
         </div>
-        <p>This OTP will expire in 5 minutes.</p>
+        <p>This OTP will expire in 25 minutes.</p>
         <p>If you didn't request this, please ignore this email.</p>
       </div>
     `;
@@ -1005,23 +892,12 @@ if (typeof email !== 'string') {
 app.post('/api/company-forgot-password', withDB(async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
-    if (
-  typeof email !== 'string' ||
-  typeof otp !== 'string' ||
-  typeof newPassword !== 'string'
-) {
-  return res.status(400).json({
-    message: 'Invalid input'
-  });
-}
 
     if (!email || !otp || !newPassword) {
       return res.status(400).json({ message: 'Email, OTP and newPassword are required' });
     }
 
-    const otpRecord = await OTP.findOne({
-  email: safeEmail
-});
+    const otpRecord = await OTP.findOne({ email });
     if (!otpRecord) return res.status(400).json({ message: 'OTP not found. Please request again.' });
 
     if (String(otpRecord.otp).trim() !== String(otp).trim()) return res.status(400).json({ message: 'Invalid OTP' });
@@ -1143,16 +1019,6 @@ app.post('/api/register_company', uploadCompanyLogo.single('logo'), async (req, 
     if (password !== confirmPassword) {
       return res.status(400).json({ message: 'Passwords do not match' });
     }
-// Password strength validation
-const strongPasswordRegex =
-  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&^#()_+\-=\[\]{};':"\\|,.<>\/?])[A-Za-z\d@$!%*?&^#()_+\-=\[\]{};':"\\|,.<>\/?]{8,}$/;
-
-if (!strongPasswordRegex.test(password)) {
-  return res.status(400).json({
-    message:
-      'Password must contain at least 8 characters, one uppercase letter, one lowercase letter, one number, and one special character.'
-  });
-}
 
     // Check if email already exists
     const existingCompany = await Company.findOne({ email: email.toLowerCase() });
@@ -1224,60 +1090,29 @@ if (!strongPasswordRegex.test(password)) {
 app.post('/api/login_company', async (req, res) => {
   try {
     const { email, password } = req.body;
-    const safeEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 
-    // Prevent NoSQL Injection
-    if (
-      typeof email !== 'string' ||
-      typeof password !== 'string'
-    ) {
-      return res.status(400).json({
-        message: 'Invalid email or password'
-      });
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Email and password are required' });
     }
 
-    const safeEmail = email.trim().toLowerCase();
-
-    if (!safeEmail || !password.trim()) {
-      return res.status(400).json({
-        message: 'Email and password are required'
-      });
-    }
-
-    const company = await Company.findOne({
-      email: safeEmail
-    });
-
+    const company = await Company.findOne({ email });
     if (!company) {
-      return res.status(401).json({
-        message: 'Invalid email or password'
-      });
+      return res.status(401).json({ message: 'Invalid email or password' });
     }
 
+    // Block login if account is deactivated (temporarily or permanently flagged)
     if (company.isDeactivated) {
-      return res.status(403).json({
-        message: 'Account deactivated. Please contact support.'
-      });
+      return res.status(403).json({ message: 'Account deactivated. Please contact support.' });
     }
 
-    const isPasswordValid = await bcrypt.compare(
-      password,
-      company.password
-    );
-
+    const isPasswordValid = await bcrypt.compare(password, company.password);
     if (!isPasswordValid) {
-      return res.status(401).json({
-        message: 'Invalid email or password'
-      });
+      return res.status(401).json({ message: 'Invalid email or password' });
     }
 
     const token = jwt.sign(
-      {
-        id: company._id,
-        email: company.email,
-        type: 'company'
-      },
-      process.env.JWT_COMPANY,
+      { id: company._id, email: company.email, type: 'company' },
+      process.env.JWT_SECRET ,
       { expiresIn: '7d' }
     );
 
@@ -1296,12 +1131,9 @@ app.post('/api/login_company', async (req, res) => {
         founded: company.founded
       }
     });
-
   } catch (error) {
     console.error('Error logging in company:', error);
-    res.status(500).json({
-      message: 'Internal server error'
-    });
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
@@ -1665,16 +1497,7 @@ const otpRecord = await OTP.findOne({ email, otp });
 if (!otpRecord) {
   return res.status(400).json({ message: 'Invalid or expired OTP' });
 }
-// Check password strength
-const strongPasswordRegex =
-  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&^#()_+\-=\[\]{};':"\\|,.<>\/?])[A-Za-z\d@$!%*?&^#()_+\-=\[\]{};':"\\|,.<>\/?]{8,}$/;
 
-if (!strongPasswordRegex.test(password)) {
-  return res.status(400).json({
-    message:
-      'Password must contain at least 8 characters, one uppercase letter, one lowercase letter, one number, and one special character.'
-  });
-}
     // 3. Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -1706,7 +1529,7 @@ if (!strongPasswordRegex.test(password)) {
     const token = jwt.sign(
       { userId: user._id, email: user.email, role: 'user' },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: '180d' }
     );
 
     // 9. Send welcome email
@@ -1726,9 +1549,14 @@ if (!strongPasswordRegex.test(password)) {
       message: 'User registered successfully',
       token,
       user: {
-  id: user._id,
-  name: user.name
-}
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        currentCity: user.currentCity,
+        pinCode: user.pinCode,
+        studyPreference: user.studyPreference
+      }
     });
 
   } catch (error) {
@@ -1742,7 +1570,6 @@ if (!strongPasswordRegex.test(password)) {
 app.post('/api/login', withDB(async (req, res) => {
   try {
     const { email, password } = req.body;
-    const safeEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 
     const user = await User.findOne({ email });
     if (!user) {
@@ -1761,21 +1588,35 @@ app.post('/api/login', withDB(async (req, res) => {
     const token = jwt.sign(
       { userId: user._id, email: user.email, role: 'user' },
       process.env.JWT_SECRET ,
-      { expiresIn: '7d' }
+      { expiresIn: '180d' }
     );
 
-  res.json({
-  message: 'Login successful',
-  token,
-  user: {
-    id: user._id,
-    name: user.name,
-    studyPreference: user.studyPreference,
-    resume: !!user.resume,
-    profilePicture: !!user.profilePicture
-  }
-});
-
+    res.json({
+      message: 'Login successful',
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        currentCity: user.currentCity,
+            pinCode:user.pinCode,
+        futureGoals: user.futureGoals,
+    
+        studyPreference: user.studyPreference,
+        section: user.section,
+        higherEducation: user.higherEducation,
+        twelfthPU: user.twelfthPU,
+        ugDegree: user.ugDegree,
+        pgMasters: user.pgMasters,
+        skills: user.skills,
+        keywords: user.keywords,
+        resume: user.resume ? true : false,
+        profilePicture: user.profilePicture ? true : false,
+        applicationCount: user.applicationCount,
+        currentAcademicStatus: user.currentAcademicStatus
+      }
+    });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ message: 'Login failed' });
@@ -1855,18 +1696,8 @@ app.put('/api/profile', authenticateToken, withDB(async (req, res) => {
 app.post('/api/admin/login', withDB(async (req, res) => {
   try {
     const { username, password } = req.body;
-    if (
-  typeof username !== 'string' ||
-  typeof password !== 'string'
-) {
-  return res.status(400).json({
-    message: 'Invalid credentials'
-  });
-}
-const safeUsername = username.trim();
-   const admin = await Admin.findOne({
-  username: safeUsername
-});
+
+    const admin = await Admin.findOne({ username });
     if (!admin) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
@@ -1881,8 +1712,8 @@ const safeUsername = username.trim();
 
     const token = jwt.sign(
       { adminId: admin._id, username: admin.username, role: 'admin' },
-      process.env.JWT_ADMIN,
-      { expiresIn: '7d' }
+      process.env.JWT_SECRET ,
+      { expiresIn: '180d' }
     );
 
     res.json({
@@ -2094,13 +1925,9 @@ app.get('/api/jobs/:id', withDB(async (req, res) => {
 // Check if user has applied for a job
 app.get('/api/jobs/:id/application-status', authenticateToken, withDB(async (req, res) => {
   try {
-    const jobId = String(req.params.id).trim();
-   const userId = String(req.user.userId).trim();
-if (!jobId || !userId) {
-  return res.status(400).json({
-    message: 'Invalid request'
-  });
-}
+    const jobId = req.params.id;
+    const userId = req.user.userId;
+
     const application = await Application.findOne({ jobId, userId });
 
     res.json({
@@ -2169,11 +1996,7 @@ app.post('/api/jobs/:id/apply', authenticateToken, withDB(async (req, res) => {
     const { coverLetter } = req.body;
     const jobId = req.params.id;
     const userId = req.user.userId;
-if (!mongoose.Types.ObjectId.isValid(userId)) {
-  return res.status(400).json({
-    message: 'Invalid user ID'
-  });
-}
+
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
@@ -2183,11 +2006,7 @@ if (!mongoose.Types.ObjectId.isValid(userId)) {
         requiresResume: true
       });
     }
-if (!mongoose.Types.ObjectId.isValid(jobId)) {
-  return res.status(400).json({
-    message: 'Invalid job ID'
-  });
-}
+
     const job = await Job.findById(jobId);
     if (!job) return res.status(404).json({ message: 'Internship not found' });
 
@@ -2384,11 +2203,7 @@ app.get(
           message: 'Access denied'
         });
       }
-if (!mongoose.Types.ObjectId.isValid(userId)) {
-  return res.status(400).json({
-    message: 'Invalid user ID'
-  });
-}
+
       const user = await User.findById(userId);
 
       if (!user || !user.resume) {
