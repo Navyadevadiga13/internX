@@ -650,7 +650,7 @@ app.post('/api/send-otp', withDB(async (req, res) => {
       { upsert: true, new: true }
     );
 
-    const emailHtml = `
+    const emailHtml =`
       <div>
         <h2>Welcome to InternX!</h2>
         <p>Your OTP is <strong>${otp}</strong></p>
