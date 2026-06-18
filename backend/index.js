@@ -596,12 +596,13 @@ app.get('/api/system-settings', withDB(async (req, res) => {
 app.post('/api/send-otp', withDB(async (req, res) => {
   try {
     const { email } = req.body;
+    const safeEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
     if (typeof email !== 'string') {
   return res.status(400).json({
     message: 'Invalid email'
   });
 }
-const safeEmail = email.trim().toLowerCase();
+
 
     if (!email) {
       return res.status(400).json({ message: 'Email is required' });
@@ -621,7 +622,7 @@ if (typeof email !== 'string') {
     message: 'Invalid email'
   });
 }
-const safeEmail = email.toLowerCase().trim();
+
     // Save OTP to database
 await OTP.findOneAndUpdate(
   { email: safeEmail },
@@ -655,12 +656,13 @@ await OTP.findOneAndUpdate(
 app.post('/api/forgot-password', withDB(async (req, res) => {
   try {
     const { email } = req.body;
+    const safeEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 if (typeof email !== 'string') {
   return res.status(400).json({
     message: 'Invalid email'
   });
 }
-const safeEmail = email.trim().toLowerCase();
+
     if (!email) {
       return res.status(400).json({ message: 'Email is required' });
     }
@@ -719,7 +721,7 @@ app.post('/api/verify-otp', withDB(async (req, res) => {
   return res.status(400).json({
     message: 'Invalid input'
   });
-}const safeEmail = email.toLowerCase().trim();
+}
 const safeOtp = otp.trim();
 
 const otpRecord = await PasswordResetOTP.findOne({
@@ -886,6 +888,7 @@ app.post("/api/company_reset_password", authenticateCompany, async (req, res) =>
 app.post('/api/company-send-otp', withDB(async (req, res) => {
   try {
     const { email } = req.body;
+    const safeEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 if (typeof email !== 'string') {
   return res.status(400).json({
     message: 'Invalid email'
@@ -894,7 +897,7 @@ if (typeof email !== 'string') {
     if (!email) {
       return res.status(400).json({ message: 'Email is required' });
     }
-const safeEmail = email.trim().toLowerCase();
+
     // Check if company exists
     const existingCompany = await Company.findOne({
   email: safeEmail
@@ -946,7 +949,6 @@ app.post('/api/company-forgot-password', withDB(async (req, res) => {
     message: 'Invalid input'
   });
 }
-const safeEmail = email.trim().toLowerCase();
 
     if (!email || !otp || !newPassword) {
       return res.status(400).json({ message: 'Email, OTP and newPassword are required' });
@@ -1147,6 +1149,7 @@ app.post('/api/register_company', uploadCompanyLogo.single('logo'), async (req, 
 app.post('/api/login_company', async (req, res) => {
   try {
     const { email, password } = req.body;
+    const safeEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 
     if (!email || !password) {
       return res.status(400).json({ message: 'Email and password are required' });
@@ -1627,6 +1630,7 @@ if (!otpRecord) {
 app.post('/api/login', withDB(async (req, res) => {
   try {
     const { email, password } = req.body;
+    const safeEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 
     const user = await User.findOne({ email });
     if (!user) {
