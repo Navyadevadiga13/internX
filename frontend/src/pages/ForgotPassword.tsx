@@ -552,20 +552,44 @@ const ForgotPassword = () => {
         ) : resendExhausted ? (
           <p className="text-xs text-gray-400">Maximum resend attempts reached</p>
         ) : (
-          <button
-            type="button"
-            onClick={handleResendOTP}
-            disabled={!canResend}
-            className="text-sm text-green-600 hover:text-green-700 disabled:text-gray-400
-                       disabled:cursor-not-allowed transition-colors"
-          >
-            {loading
-              ? 'Sending…'
-              : resendOnCooldown
-                ? `Resend OTP in ${Math.floor(resendSecsLeft / 60)}:${String(resendSecsLeft % 60).padStart(2, '0')}`
-                : `Resend OTP (${MAX_RESENDS - resendCount} left)`
-            }
-          </button>
+          
+<div className="flex justify-center">
+  <button
+    type="button"
+    onClick={handleResendOTP}
+    disabled={!canResend}
+    className={`
+      px-5 py-3
+      rounded-lg
+      font-medium
+      text-sm
+      border
+      transition-all
+      duration-300
+      flex
+      items-center
+      justify-center
+      min-w-[220px]
+
+      ${
+        canResend
+          ? 'bg-green-600 text-white border-green-600 hover:bg-green-700 shadow-md'
+          : 'bg-gray-200 text-gray-500 border-gray-300 cursor-not-allowed'
+      }
+    `}
+  >
+    {loading
+      ? 'Sending...'
+      : resendOnCooldown
+        ? `Resend OTP in ${Math.floor(resendSecsLeft / 60)}:${String(
+            resendSecsLeft % 60
+          ).padStart(2, '0')}`
+        : `Resend OTP (${MAX_RESENDS - resendCount} left)`
+    }
+  </button>
+</div>
+
+
         )}
         <div className="flex justify-center gap-2 mt-2">
           {Array.from({ length: MAX_RESENDS + 1 }).map((_, i) => (
