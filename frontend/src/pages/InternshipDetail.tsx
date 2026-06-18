@@ -553,8 +553,6 @@ const InternshipDetail = () => {
                         </label>
                       </div>
 
-
-
                       <div className="flex flex-row gap-4 justify-center">  {/* Changed: flex-col sm:flex-row → flex-row, added justify-center */}
                         <button
                           onClick={handleApply}
